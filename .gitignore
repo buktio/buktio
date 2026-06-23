@@ -18,8 +18,6 @@ secrets.env
 *.key
 *.pem
 
-# Claude Code local settings (may hold API tokens) — NEVER commit
-.claude/settings.local.json
 
 # Node / Next.js
 node_modules/
