@@ -152,5 +152,5 @@ Found a vulnerability? Please report it responsibly — see [SECURITY.md](SECURI
 ## Links
 
 - **Repository:** https://github.com/buktio/buktio
-- **Website / docs:** https://buktio.org (TODO: not live yet)
-- **Live read-only demo:** https://demo.buktio.org (TODO: not live yet)
+- **Website:** https://buktio.org
+- **Live read-only demo:** https://demo.buktio.org _(coming soon)_
