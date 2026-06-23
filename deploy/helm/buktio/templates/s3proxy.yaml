@@ -1,0 +1,46 @@
+{{- if .Values.s3proxy.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "buktio.fullname" . }}-s3proxy
+  labels: {{- include "buktio.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.s3proxy.replicas }}
+  selector:
+    matchLabels: {{- include "buktio.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: s3proxy
+  template:
+    metadata:
+      labels: {{- include "buktio.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: s3proxy
+    spec:
+      serviceAccountName: {{ include "buktio.serviceAccountName" . }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: s3proxy
+          image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}/{{ .Values.s3proxy.image.name }}:{{ include "buktio.imageTag" . }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - { name: s3, containerPort: 3900 }
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ include "buktio.fullname" . }}-secrets, key: POSTGRES_PASSWORD, optional: true } }
+            - name: DATABASE_URL
+              value: {{ include "buktio.databaseUrl" . | quote }}
+            - name: BUKTIO_S3_UPSTREAM
+              value: "http://{{ include "buktio.fullname" . }}-garage:3900"
+          resources: {{- toYaml .Values.s3proxy.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "buktio.fullname" . }}-s3proxy
+  labels: {{- include "buktio.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "buktio.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: s3proxy
+  ports:
+    - { name: s3, port: 3900, targetPort: s3 }
+{{- end }}

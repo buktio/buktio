@@ -1,0 +1,43 @@
+# Build output
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+coverage.*
+
+# Go
+/vendor/
+go.work.sum
+
+# Secrets & local env (NEVER commit)
+.env
+*.env
+!*.env.example
+secrets.env
+*.key
+*.pem
+
+# Claude Code local settings (may hold API tokens) — NEVER commit
+.claude/settings.local.json
+
+# Node / Next.js
+node_modules/
+apps/web/.next/
+apps/web/out/
+apps/web/.turbo/
+*.tsbuildinfo
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+
+# Local data volumes / dumps
+/data/
+*.dump
+*.sql.gz
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

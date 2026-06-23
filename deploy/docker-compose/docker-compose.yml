@@ -1,0 +1,148 @@
+# buktio — primary install path.
+#
+#   cp .env.example .env   # then fill in generated secrets (see README)
+#   docker compose up -d
+#
+# Garage runs UNMODIFIED, pinned by tag, and is NEVER host-published: its S3
+# (:3900) and Admin (:3903) ports are reachable only on the internal network,
+# from the api service. Only caddy publishes host ports (80/443). TLS is
+# terminated at the edge (Garage has no native TLS).
+name: buktio
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+  caddy:
+    image: caddy:2
+    <<: *restart
+    profiles: ["", "proxy"]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      - BUKTIO_DOMAIN=${BUKTIO_DOMAIN:-localhost}
+    # edge (published 80/443) + internal (to reach garage for the s3.<domain> and
+    # *.web.<domain> routes used by presigned URLs and public websites).
+    networks: [buktio_edge, buktio_internal]
+    depends_on:
+      web: { condition: service_healthy }
+      api: { condition: service_healthy }
+
+  web:
+    image: buktio/web:${BUKTIO_VERSION:-dev}
+    build:
+      context: ../..
+      dockerfile: build/web.Dockerfile
+    <<: *restart
+    environment:
+      - BUKTIO_API_URL=http://api:8080
+    networks: [buktio_edge, buktio_internal]
+    depends_on:
+      api: { condition: service_healthy }
+    healthcheck:
+      # 127.0.0.1 (not localhost): the Next server binds IPv4 0.0.0.0 only.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  api:
+    image: buktio/api:${BUKTIO_VERSION:-dev}
+    build:
+      context: ../..
+      dockerfile: build/api.Dockerfile
+    <<: *restart
+    env_file: [.env]
+    environment:
+      - DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      - GARAGE_ADMIN_URL=http://garage:3903
+      - GARAGE_S3_URL=http://garage:3900
+      - GARAGE_S3_REGION=garage
+      - BUKTIO_HTTP_ADDR=:8080
+      - BUKTIO_BACKUP_DIR=/var/lib/buktio/backups
+    volumes:
+      - app_config:/etc/buktio
+      - backups:/var/lib/buktio/backups
+    networks: [buktio_edge, buktio_internal]
+    depends_on:
+      postgres: { condition: service_healthy }
+      garage:   { condition: service_started }   # garage image has no shell/wget to health-probe
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  s3proxy:
+    image: buktio/s3proxy:${BUKTIO_VERSION:-dev}
+    build:
+      context: ../..
+      dockerfile: build/s3proxy.Dockerfile
+    <<: *restart
+    environment:
+      - DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      - BUKTIO_S3PROXY_ADDR=:3900
+      - BUKTIO_S3PROXY_UPSTREAM=http://garage:3900
+      - BUKTIO_S3PROXY_FLUSH_INTERVAL=30s
+    # Internal only — Caddy's s3.<domain> route points here, and it forwards to garage.
+    networks: [buktio_internal]
+    depends_on:
+      postgres: { condition: service_healthy }
+      garage:   { condition: service_started }
+
+  postgres:
+    image: postgres:16
+    <<: *restart
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks: [buktio_internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  garage:
+    image: dxflrs/garage:v2.3.0          # PINNED. never :latest
+    <<: *restart
+    environment:
+      # Secrets injected via env so the rendered garage.toml stays non-sensitive.
+      - GARAGE_RPC_SECRET=${GARAGE_RPC_SECRET}
+      - GARAGE_ADMIN_TOKEN=${GARAGE_ADMIN_TOKEN}
+      - GARAGE_METRICS_TOKEN=${GARAGE_METRICS_TOKEN}
+    volumes:
+      - ./garage.toml:/etc/garage.toml:ro
+      - garage_meta:/var/lib/garage/meta
+      - garage_data:/var/lib/garage/data
+    # NO ports published — reachable only as garage:3900 / garage:3903 internally.
+    networks: [buktio_internal]
+    # M0 skeleton uses --single-node (v2.3.0) so the cluster self-bootstraps a
+    # layout and /health returns 200. From M2 the api's garage-manager performs
+    # the explicit, idempotent Admin-API layout bootstrap and this drops to
+    # plain "server" so buktio owns the credential lifecycle.
+    command: ["/garage", "-c", "/etc/garage.toml", "server", "--single-node"]
+    # No healthcheck: the official Garage image is FROM scratch (no shell/wget).
+    # The api's /readyz probe verifies Garage admin reachability instead.
+
+networks:
+  buktio_edge:
+  buktio_internal:
+    internal: true
+
+volumes:
+  pg_data:
+  garage_meta:
+  garage_data:
+  app_config:
+  backups:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & ideas (Discussions)
+    url: https://github.com/buktio/buktio/discussions
+    about: Ask questions, share setups, or propose larger features here first.
+  - name: Security vulnerability
+    url: https://github.com/buktio/buktio/security/policy
+    about: Please report security issues privately — do not open a public issue. See SECURITY.md.

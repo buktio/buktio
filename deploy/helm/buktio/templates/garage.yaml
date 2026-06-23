@@ -1,0 +1,98 @@
+# Garage runs UNMODIFIED. Its S3 (:3900), Admin (:3903) and RPC (:3901) ports are
+# exposed only via a headless/ClusterIP Service inside the cluster — never through
+# the Ingress — keeping the AGPLv3 network-copyleft dormant.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "buktio.fullname" . }}-garage
+  labels: {{- include "buktio.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "buktio.fullname" . }}-garage
+  replicas: 1
+  selector:
+    matchLabels: {{- include "buktio.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: garage
+  template:
+    metadata:
+      labels: {{- include "buktio.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: garage
+    spec:
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: garage
+          image: {{ .Values.garage.image | quote }}
+          args: ["/garage", "-c", "/etc/garage.toml", "server"]
+          ports:
+            - { name: s3, containerPort: 3900 }
+            - { name: rpc, containerPort: 3901 }
+            - { name: web, containerPort: 3902 }
+            - { name: admin, containerPort: 3903 }
+          env:
+            - name: GARAGE_RPC_SECRET
+              valueFrom: { secretKeyRef: { name: {{ include "buktio.fullname" . }}-secrets, key: GARAGE_RPC_SECRET } }
+            - name: GARAGE_ADMIN_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ include "buktio.fullname" . }}-secrets, key: GARAGE_ADMIN_TOKEN } }
+            - name: GARAGE_METRICS_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ include "buktio.fullname" . }}-secrets, key: GARAGE_METRICS_TOKEN } }
+          volumeMounts:
+            - { name: meta, mountPath: /var/lib/garage/meta }
+            - { name: data, mountPath: /var/lib/garage/data }
+            - { name: config, mountPath: /etc/garage.toml, subPath: garage.toml }
+          resources: {{- toYaml .Values.garage.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap: { name: {{ include "buktio.fullname" . }}-garage }
+  volumeClaimTemplates:
+    - metadata: { name: meta }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.garage.storage.meta.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources: { requests: { storage: {{ .Values.garage.storage.meta.size }} } }
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.garage.storage.data.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources: { requests: { storage: {{ .Values.garage.storage.data.size }} } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "buktio.fullname" . }}-garage
+  labels: {{- include "buktio.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "buktio.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: garage
+  ports:
+    - { name: s3, port: 3900, targetPort: s3 }
+    - { name: admin, port: 3903, targetPort: admin }
+    - { name: web, port: 3902, targetPort: web }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "buktio.fullname" . }}-garage
+  labels: {{- include "buktio.labels" . | nindent 4 }}
+data:
+  garage.toml: |
+    metadata_dir = "/var/lib/garage/meta"
+    data_dir = "/var/lib/garage/data"
+    db_engine = "sqlite"
+    replication_factor = {{ .Values.garage.replicationFactor }}
+    rpc_bind_addr = "[::]:3901"
+    rpc_secret_file = "/run/secrets/garage_rpc_secret"
+    [s3_api]
+    api_bind_addr = "[::]:3900"
+    s3_region = "garage"
+    root_domain = ".s3.garage.internal"
+    [s3_web]
+    bind_addr = "[::]:3902"
+    root_domain = ".web.garage.internal"
+    [admin]
+    api_bind_addr = "[::]:3903"
+    admin_token_file = "/run/secrets/garage_admin_token"
+    metrics_token_file = "/run/secrets/garage_metrics_token"

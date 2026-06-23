@@ -1,0 +1,33 @@
+[Unit]
+Description=buktio storage engine (internal)
+Documentation=https://github.com/buktio/buktio
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=buktio
+Group=buktio
+# Garage runs UNMODIFIED; only S3 (:3900) + Admin (:3903) are used, both bound to
+# 127.0.0.1 in /etc/buktio/garage.toml. Secrets injected via EnvironmentFile.
+EnvironmentFile=/etc/buktio/garage.env
+ExecStart=/opt/buktio/bin/garage -c /etc/buktio/garage.toml server
+Restart=always
+RestartSec=2
+
+# Hardening.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/garage
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

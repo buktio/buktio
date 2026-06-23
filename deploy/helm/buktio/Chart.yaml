@@ -1,0 +1,17 @@
+apiVersion: v2
+name: buktio
+description: buktio — self-hosted S3 control plane (API + web + hidden Garage engine)
+type: application
+# Chart version tracks packaging changes; appVersion tracks the buktio release.
+version: 0.1.0
+appVersion: "enterprise-1.0.0"
+keywords:
+  - s3
+  - object-storage
+  - garage
+  - control-plane
+home: https://github.com/buktio/buktio
+sources:
+  - https://github.com/buktio/buktio
+maintainers:
+  - name: buktio

@@ -1,0 +1,24 @@
+buktio {{ .Chart.AppVersion }} ({{ .Values.edition }}) installed as {{ include "buktio.fullname" . }}.
+
+{{- if .Values.ingress.enabled }}
+Open the panel:  https://{{ .Values.ingress.host }}
+{{- else }}
+No Ingress was created. Port-forward the web service to reach the panel:
+  kubectl port-forward svc/{{ include "buktio.fullname" . }}-web 3000:3000
+{{- end }}
+
+Garage runs unmodified and is reachable only inside the cluster (ClusterIP); its
+S3/Admin ports are never exposed through the Ingress.
+
+{{- if ne .Values.edition "oss" }}
+{{- if not .Values.secrets.licenseToken }}
+
+WARNING: edition is {{ .Values.edition }} but secrets.licenseToken is empty — the
+api will FAIL CLOSED to OSS (all features free, no paid capabilities).
+{{- end }}
+{{- end }}
+{{- if and .Values.api.rls (not .Values.externalDatabase.url) (not .Values.postgres.appUser) }}
+
+NOTE: api.rls is on but no non-superuser DB role is configured; RLS will be inert
+(superusers bypass RLS). Set postgres.appUser or use an external DB role.
+{{- end }}

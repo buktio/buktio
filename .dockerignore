@@ -1,0 +1,20 @@
+# Keep Docker build contexts small and free of secrets.
+.git
+.github
+bin/
+dist/
+docs/
+**/node_modules
+apps/web/.next
+apps/web/out
+**/*.tsbuildinfo
+
+# Never ship local env / secrets into an image.
+**/.env
+!**/.env.example
+deploy/docker-compose/.env
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/

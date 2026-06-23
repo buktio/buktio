@@ -1,0 +1,67 @@
+# buktio edge proxy. One public HTTPS entrypoint; Garage stays fully behind it.
+#
+# BUKTIO_DOMAIN=localhost  -> Caddy issues an internal-CA cert (HTTPS in local dev).
+# BUKTIO_DOMAIN=host.tld   -> Caddy obtains a Let's Encrypt cert automatically.
+#
+# Subdomains used (all resolve to loopback in browsers for *.localhost):
+#   s3.<domain>        -> Garage S3 (:3900), NO path rewrite, so presigned SigV4
+#                         URLs stay valid (set BUKTIO_S3_PUBLIC_ENDPOINT=https://s3.<domain>).
+#   *.web.<domain>     -> Garage website hosting (:3902); a public bucket is served
+#                         at https://<bucket>.web.<domain>/.
+
+# On-demand TLS for Enterprise white-label custom domains: Caddy asks the API
+# before issuing a cert, so ONLY domains an org has registered get one. This guard
+# is mandatory — without it any host could trigger unbounded certificate issuance.
+{
+	on_demand_tls {
+		ask http://api:8080/api/v1/branding/domains/verify
+	}
+}
+
+# Panel + API.
+{$BUKTIO_DOMAIN} {
+	encode zstd gzip
+
+	handle /api/* {
+		reverse_proxy api:8080
+	}
+
+	# Legacy path route (kept for compatibility; presign now uses s3.<domain>).
+	handle /s3/* {
+		uri strip_prefix /s3
+		reverse_proxy garage:3900
+	}
+
+	# Panel (default).
+	handle {
+		reverse_proxy web:3000
+	}
+}
+
+# S3 API on a dedicated subdomain — NO prefix strip, so presigned URLs work.
+# Routed through buktio-s3proxy (which forwards to garage:3900) so per-key traffic
+# and egress are metered; Garage still validates SigV4 end-to-end.
+s3.{$BUKTIO_DOMAIN} {
+	reverse_proxy s3proxy:3900
+}
+
+# Public bucket websites: https://<bucket>.web.<domain>/
+*.web.{$BUKTIO_DOMAIN} {
+	reverse_proxy garage:3902
+}
+
+# Enterprise white-label custom domains. Any host not matched above gets an
+# on-demand cert (gated by the ask endpoint above) and is served the panel; the
+# UI themes itself from GET /api/v1/branding/resolve by Host.
+https:// {
+	tls {
+		on_demand
+	}
+	encode zstd gzip
+	handle /api/* {
+		reverse_proxy api:8080
+	}
+	handle {
+		reverse_proxy web:3000
+	}
+}

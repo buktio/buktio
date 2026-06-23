@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "buktio.fullname" . }}-api
+  labels: {{- include "buktio.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels: {{- include "buktio.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels: {{- include "buktio.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+    spec:
+      serviceAccountName: {{ include "buktio.serviceAccountName" . }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: api
+          {{- $img := ternary "buktio-api-ee" .Values.api.image.name (ne .Values.edition "oss") }}
+          image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}/{{ $img }}:{{ include "buktio.imageTag" . }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - { name: http, containerPort: 8080 }
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ include "buktio.fullname" . }}-secrets, key: POSTGRES_PASSWORD, optional: true } }
+            - name: DATABASE_URL
+              value: {{ include "buktio.databaseUrl" . | quote }}
+            - name: GARAGE_ADMIN_URL
+              value: "http://{{ include "buktio.fullname" . }}-garage:3903"
+            - name: GARAGE_S3_URL
+              value: "http://{{ include "buktio.fullname" . }}-garage:3900"
+            - name: BUKTIO_RLS
+              value: {{ ternary "on" "off" .Values.api.rls | quote }}
+          envFrom:
+            - secretRef: { name: {{ include "buktio.fullname" . }}-secrets }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources: {{- toYaml .Values.api.resources | nindent 12 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "buktio.fullname" . }}-api
+  labels: {{- include "buktio.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "buktio.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+  ports:
+    - { name: http, port: 8080, targetPort: http }

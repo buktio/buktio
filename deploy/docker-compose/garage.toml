@@ -1,0 +1,36 @@
+# buktio-managed Garage configuration (NON-SENSITIVE).
+#
+# Secrets (rpc_secret, admin_token, metrics_token) are NOT in this file — they are
+# injected via the GARAGE_RPC_SECRET / GARAGE_ADMIN_TOKEN / GARAGE_METRICS_TOKEN
+# environment variables (see .env). From M2 this file is rendered by buktio's
+# garage-manager from a template; this checked-in copy is the compose default.
+
+metadata_dir = "/var/lib/garage/meta"
+data_dir     = "/var/lib/garage/data"
+
+# Appliance durability default: SQLite is crash-resilient and arch-portable.
+# LMDB is faster but corruption-prone on unclean shutdown (buktio internal knob).
+db_engine = "sqlite"
+
+replication_factor = 1
+consistency_mode   = "consistent"
+
+# Bind to 0.0.0.0 (IPv4) for reliable container-to-container networking.
+rpc_bind_addr   = "0.0.0.0:3901"
+rpc_public_addr = "127.0.0.1:3901"
+
+[s3_api]
+api_bind_addr = "0.0.0.0:3900"
+s3_region     = "garage"
+# vhost-style addressing domain (path-style also works, used by presign).
+root_domain   = ".s3.localhost"
+
+[s3_web]
+bind_addr   = "0.0.0.0:3902"
+# Public bucket websites are served at <bucket>.web.localhost (proxied by Caddy).
+root_domain = ".web.localhost"
+index       = "index.html"
+
+[admin]
+api_bind_addr         = "0.0.0.0:3903"   # internal network only; never host-published
+metrics_require_token = true

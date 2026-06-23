@@ -1,0 +1,99 @@
+# Default values for the buktio chart. Garage runs UNMODIFIED as a separate
+# StatefulSet reached only over its S3 (:3900) and Admin (:3903) APIs — both
+# ClusterIP-only, never exposed — so the AGPLv3 network-copyleft stays dormant.
+
+nameOverride: ""
+fullnameOverride: ""
+
+# edition: "oss" runs apps/api/cmd/server; "enterprise"/"pro"/"hosted" runs the
+# ee image and reads a license from the secret below.
+edition: oss
+
+image:
+  registry: ghcr.io
+  repository: buktio
+  pullPolicy: IfNotPresent
+  # Overridden per-component below; tag defaults to the chart appVersion.
+  tag: ""
+
+api:
+  replicas: 2
+  image: { name: buktio-api } # ee image when edition != oss: buktio-api-ee
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: "1", memory: 512Mi }
+  # Per-request Postgres RLS (Enterprise). When true, set postgres.appUser creds.
+  rls: false
+
+web:
+  replicas: 2
+  image: { name: buktio-web }
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
+s3proxy:
+  enabled: true
+  replicas: 2
+  image: { name: buktio-s3proxy }
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+
+garage:
+  image: dxflrs/garage:v2.3.0 # PINNED. never :latest
+  replicationFactor: 1
+  storage:
+    meta: { size: 10Gi, storageClass: "" }
+    data: { size: 100Gi, storageClass: "" }
+  resources:
+    requests: { cpu: 200m, memory: 256Mi }
+    limits: { cpu: "2", memory: 2Gi }
+
+# Bundled Postgres for quick installs. For production, disable and point
+# externalDatabase.url at a managed Postgres.
+postgres:
+  enabled: true
+  image: postgres:16
+  database: buktio
+  user: buktio
+  # appUser is the NON-superuser role used when api.rls=true (RLS only bites for
+  # non-superusers). Leave empty to reuse `user` (RLS then inert).
+  appUser: buktio_app
+  storage: { size: 10Gi, storageClass: "" }
+
+externalDatabase:
+  url: "" # e.g. postgres://user:pass@host:5432/buktio?sslmode=require
+
+ingress:
+  enabled: true
+  className: ""
+  host: buktio.local
+  tls: { enabled: true, secretName: buktio-tls }
+  annotations: {}
+
+# Secrets. In production set these via --set-file / a sealed secret / external
+# secrets operator; the chart never bakes secret material into a values default.
+secrets:
+  # buktio master KEK (base64 32 bytes) — back up SEPARATELY.
+  masterKey: ""
+  # Garage internal secrets (generated if left empty by the pre-install hook is
+  # out of scope here; provide explicitly).
+  garageRpcSecret: ""
+  garageAdminToken: ""
+  garageMetricsToken: ""
+  # Enterprise license token (edition != oss). Maps to BUKTIO_LICENSE_TOKEN.
+  licenseToken: ""
+
+serviceAccount:
+  create: true
+  name: ""
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile: { type: RuntimeDefault }
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: ["ALL"] }

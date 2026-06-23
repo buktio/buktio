@@ -1,0 +1,34 @@
+[Unit]
+Description=buktio API
+Documentation=https://github.com/buktio/buktio
+After=network-online.target postgresql.service buktio-garage.service
+Wants=network-online.target
+Requires=buktio-garage.service
+
+[Service]
+Type=simple
+User=buktio
+Group=buktio
+# DATABASE_URL, GARAGE_*_URL, BUKTIO_MASTER_KEY, and (ee) BUKTIO_LICENSE_TOKEN live
+# in this 0600 root:buktio file. The api binary is buktio-api (OSS) or
+# buktio-api-ee (paid) — install.sh symlinks /opt/buktio/bin/buktio-api.
+EnvironmentFile=/etc/buktio/api.env
+ExecStart=/opt/buktio/bin/buktio-api
+Restart=always
+RestartSec=2
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/buktio
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

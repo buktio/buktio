@@ -1,0 +1,32 @@
+[Unit]
+Description=buktio web panel
+Documentation=https://github.com/buktio/buktio
+After=network-online.target buktio-api.service
+Wants=network-online.target
+Requires=buktio-api.service
+
+[Service]
+Type=simple
+User=buktio
+Group=buktio
+Environment=NODE_ENV=production
+Environment=PORT=3000
+EnvironmentFile=/etc/buktio/web.env
+ExecStart=/usr/bin/node /opt/buktio/web/server.js
+Restart=always
+RestartSec=2
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

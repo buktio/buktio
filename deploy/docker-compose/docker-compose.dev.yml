@@ -1,0 +1,47 @@
+# buktio DEV infrastructure — Postgres + Garage only, with host-published ports.
+#
+# Use this while developing: run the infra in Docker, and run the Go API and the
+# Next.js web app locally (so you get fast rebuilds). The full-stack compose
+# (docker-compose.yml) additionally builds and runs the api/web/caddy containers.
+#
+#   ./gen-env.sh                                   # once, creates .env
+#   docker compose -f docker-compose.dev.yml up -d # Postgres :5432, Garage :3900/:3903
+#   ../../scripts/dev-api.sh                        # run the API locally against this infra
+#   (cd ../../apps/web && pnpm dev)                 # run the web app locally
+name: buktio-dev
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    env_file: [.env]
+    ports:
+      # Default 5433 to avoid clashing with a local Postgres on 5432.
+      # Override with BUKTIO_PG_PORT in .env.
+      - "${BUKTIO_PG_PORT:-5433}:5432"
+    volumes:
+      - pg_data_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  garage:
+    image: dxflrs/garage:v2.3.0          # PINNED. never :latest
+    restart: unless-stopped
+    env_file: [.env]
+    ports:
+      - "${BUKTIO_S3_PORT:-3900}:3900"      # S3 API
+      - "${BUKTIO_ADMIN_PORT:-3903}:3903"   # Admin API v2 (local dev only — needs the admin token)
+    volumes:
+      - ./garage.toml:/etc/garage.toml:ro
+      - garage_meta_dev:/var/lib/garage/meta
+      - garage_data_dev:/var/lib/garage/data
+    command: ["/garage", "-c", "/etc/garage.toml", "server", "--single-node"]
+    # No healthcheck: the official Garage image is FROM scratch (no shell/wget).
+
+volumes:
+  pg_data_dev:
+  garage_meta_dev:
+  garage_data_dev:

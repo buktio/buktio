@@ -1,0 +1,22 @@
+buktio
+Copyright 2026 The buktio Authors
+
+This product includes software developed by the buktio Authors,
+licensed under the Apache License, Version 2.0.
+
+----------------------------------------------------------------------
+Third-party components
+----------------------------------------------------------------------
+
+This product is designed to run alongside Garage, an S3-compatible
+object storage engine developed by the Deuxfleurs association and
+licensed under the GNU Affero General Public License v3.0 (AGPLv3).
+
+buktio runs Garage UNMODIFIED as a separate process and communicates
+with it only over its public network APIs (S3 and Admin HTTP). buktio
+does not link, embed, or modify Garage source code. The official Garage
+container image / binary is obtained from upstream; buktio conveys no
+Garage object code as part of its own distribution.
+
+See THIRD-PARTY-LICENSES.md and docs/LICENSING.md for details, the
+pinned Garage version, and the upstream source location.
