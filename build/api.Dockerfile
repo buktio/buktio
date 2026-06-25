@@ -16,6 +16,7 @@ RUN apk add --no-cache wget ca-certificates postgresql16-client \
  && adduser -D -u 10001 buktio \
  && mkdir -p /var/lib/buktio/backups && chown buktio /var/lib/buktio/backups
 COPY --from=build /out/buktio-api /usr/local/bin/buktio-api
+LABEL org.opencontainers.image.source="https://github.com/buktio/buktio"
 USER buktio
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/buktio-api"]

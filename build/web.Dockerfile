@@ -22,6 +22,7 @@ RUN addgroup -g 10002 nodejs && adduser -D -u 10002 -G nodejs nextjs
 COPY --from=build /app/public ./public
 COPY --from=build --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static
+LABEL org.opencontainers.image.source="https://github.com/buktio/buktio"
 USER nextjs
 EXPOSE 3000
 CMD ["node", "server.js"]
