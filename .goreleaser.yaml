@@ -1,0 +1,94 @@
+# GoReleaser config for the buktio OSS core. This file is OSS-safe: it builds ONLY
+# the Apache-2.0 binaries (CLI, API server, S3 metering proxy) from the root Go
+# module and is synced verbatim to the public repo. The paid editions
+# (cmd/buktio-api-ee, cmd/keygen) and the satellite modules (operators/,
+# terraform-provider-buktio — separate go.mod, released from their own repos) are
+# deliberately NOT built here.
+version: 2
+project_name: buktio
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  # CLI — the primary end-user binary (status/logs/restart/doctor/backup/restore/upgrade/cluster).
+  - id: buktio
+    main: ./cmd/buktio
+    binary: buktio
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+
+  # API server — published for provenance/checksums; the container image is the primary delivery.
+  - id: buktio-api
+    main: ./apps/api/cmd/server
+    binary: buktio-api
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+
+  # S3 metering proxy. No `version` var in its main package, so no -X injection.
+  - id: buktio-s3proxy
+    main: ./cmd/buktio-s3proxy
+    binary: buktio-s3proxy
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: default
+    ids: [buktio, buktio-api, buktio-s3proxy]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - NOTICE
+      - THIRD-PARTY-LICENSES.md
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+# Per-archive SBOMs via syft (the release runner must have syft on PATH — the CI
+# release job installs it with anchore/sbom-action/download-syft).
+sboms:
+  - id: archive
+    artifacts: archive
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - '^ci:'
+      - 'Merge '
+  groups:
+    - { title: Features, regexp: '^.*?feat(\(.+\))??!?:.+$', order: 0 }
+    - { title: Fixes, regexp: '^.*?fix(\(.+\))??!?:.+$', order: 1 }
+    - { title: Performance, regexp: '^.*?perf(\(.+\))??!?:.+$', order: 2 }
+    - { title: Others, order: 999 }
+
+release:
+  github:
+    owner: buktio
+    name: buktio
+  # Draft so a human reviews and publishes — fits the gated-publish workflow.
+  draft: true
+  prerelease: auto
+
+# nfpms (.deb/.rpm packaging of the CLI) is reserved for a future release.

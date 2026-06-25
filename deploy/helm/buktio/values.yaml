@@ -16,17 +16,30 @@ image:
   # Overridden per-component below; tag defaults to the chart appVersion.
   tag: ""
 
+# Pull secrets for private registries (the EE image is private). Each entry is
+# { name: <secret> }; attached to the chart's ServiceAccount.
+imagePullSecrets: []
+
 api:
   replicas: 2
+  # Numeric uid matching the image's USER (Dockerfile creates buktio uid 10001).
+  # Required because runAsNonRoot can't verify a non-numeric image USER.
+  runAsUser: 10001
   image: { name: buktio-api } # ee image when edition != oss: buktio-api-ee
   resources:
     requests: { cpu: 100m, memory: 128Mi }
     limits: { cpu: "1", memory: 512Mi }
   # Per-request Postgres RLS (Enterprise). When true, set postgres.appUser creds.
   rls: false
+  # Public-facing endpoints used to build presigned URLs and public-website links.
+  # Set these to the externally reachable S3 host and the wildcard website domain
+  # (e.g. https://s3.example.com and web.example.com). Empty = derive from request.
+  s3PublicEndpoint: ""
+  webPublicDomain: ""
 
 web:
   replicas: 2
+  runAsUser: 10002 # image USER nextjs (uid 10002)
   image: { name: buktio-web }
   resources:
     requests: { cpu: 50m, memory: 128Mi }
@@ -35,7 +48,11 @@ web:
 s3proxy:
   enabled: true
   replicas: 2
+  runAsUser: 10002 # image USER buktio (uid 10002)
   image: { name: buktio-s3proxy }
+  # UUID of the cluster whose S3 traffic this proxy fronts (for per-key metering).
+  # Leave empty to record traffic without a cluster id.
+  clusterId: ""
   resources:
     requests: { cpu: 50m, memory: 64Mi }
     limits: { cpu: 500m, memory: 256Mi }
@@ -43,7 +60,13 @@ s3proxy:
 garage:
   image: dxflrs/garage:v2.3.0 # PINNED. never :latest
   replicationFactor: 1
+  # Garage runs as the image's default user (root) like the compose stack; leave
+  # empty to impose no pod security context. Override for a hardened install.
+  podSecurityContext: {}
   storage:
+    # ephemeral: true uses emptyDir (no PVC) — for demo/throwaway installs or
+    # clusters without a dynamic provisioner. Data is lost on pod restart.
+    ephemeral: false
     meta: { size: 10Gi, storageClass: "" }
     data: { size: 100Gi, storageClass: "" }
   resources:
@@ -60,17 +83,39 @@ postgres:
   # appUser is the NON-superuser role used when api.rls=true (RLS only bites for
   # non-superusers). Leave empty to reuse `user` (RLS then inert).
   appUser: buktio_app
-  storage: { size: 10Gi, storageClass: "" }
+  # ephemeral: true uses emptyDir (no PVC). Data is lost on pod restart — fine for
+  # a demo, NOT for production (use a PVC or externalDatabase.url instead).
+  storage: { ephemeral: false, size: 10Gi, storageClass: "" }
 
 externalDatabase:
   url: "" # e.g. postgres://user:pass@host:5432/buktio?sslmode=require
 
+# Ingress is MULTI-HOST: one Ingress object per entry in `hosts`. Each entry routes
+# a host to one service:
+#   service: web      → the panel / read-only demo  (port 3000)
+#   service: s3proxy  → the S3 API (SigV4)           (port 3900)
+#   service: api      → the REST API directly        (port 8080)
+# `cloudflare: true` marks a proxied/orange host — it gets the Cloudflare edge-IP
+# whitelist (cloudflareSourceRange) so only Cloudflare can reach the origin. The S3
+# host MUST stay cloudflare:false (DNS-only/gray): SigV4 breaks behind the CF proxy
+# and whitelisting CF ranges on a gray host would block all clients. TLS terminates
+# at nginx via cert-manager for every host (no ssl-passthrough — the proxy preserves
+# Host and never rewrites the path, so SigV4 survives normal termination).
 ingress:
   enabled: true
   className: ""
-  host: buktio.local
-  tls: { enabled: true, secretName: buktio-tls }
+  # cert-manager ClusterIssuer for per-host certs (e.g. letsencrypt-buktio-dns).
+  # Empty omits the cert-manager annotation (bring your own TLS secrets).
+  clusterIssuer: ""
+  # Cloudflare edge IPv4+IPv6 ranges, applied as whitelist-source-range on hosts with
+  # cloudflare:true. Empty = no source-range whitelist.
+  cloudflareSourceRange: ""
   annotations: {}
+  hosts:
+    - host: buktio.local
+      service: web
+      cloudflare: false
+      tls: buktio-tls
 
 # Secrets. In production set these via --set-file / a sealed secret / external
 # secrets operator; the chart never bakes secret material into a values default.
@@ -84,6 +129,23 @@ secrets:
   garageMetricsToken: ""
   # Enterprise license token (edition != oss). Maps to BUKTIO_LICENSE_TOKEN.
   licenseToken: ""
+
+# Read-only public demo seed. A post-install/upgrade Helm hook Job seeds a demo org
+# with sample data and a `viewer`-role login. Requires edition != oss AND a license
+# with rbac_enforced, so the viewer's writes are denied at the API (internal/service
+# guard) — that is what makes the demo read-only. Idempotent: re-runs are no-ops once
+# the admin exists. NEVER enable this on a real (writable) install.
+demo:
+  enabled: false
+  # Shared viewer login shown on the demo's sign-in screen.
+  email: demo@example.com
+  password: ""
+  fullName: "Demo (read-only)"
+  bucket: demo-bucket
+  # Internal-only bootstrap admin (used by the seed Job, not advertised). If password
+  # is empty the Job generates a random one (kept only inside the Job's lifetime).
+  adminEmail: demo-admin@example.com
+  adminPassword: ""
 
 serviceAccount:
   create: true

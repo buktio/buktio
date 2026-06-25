@@ -14,7 +14,11 @@ spec:
         app.kubernetes.io/component: api
     spec:
       serviceAccountName: {{ include "buktio.serviceAccountName" . }}
-      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        runAsUser: {{ .Values.api.runAsUser }}
+        runAsGroup: {{ .Values.api.runAsUser }}
+        fsGroup: {{ .Values.api.runAsUser }}
       containers:
         - name: api
           {{- $img := ternary "buktio-api-ee" .Values.api.image.name (ne .Values.edition "oss") }}
@@ -34,6 +38,14 @@ spec:
               value: "http://{{ include "buktio.fullname" . }}-garage:3900"
             - name: BUKTIO_RLS
               value: {{ ternary "on" "off" .Values.api.rls | quote }}
+            {{- with .Values.api.s3PublicEndpoint }}
+            - name: BUKTIO_S3_PUBLIC_ENDPOINT
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.api.webPublicDomain }}
+            - name: BUKTIO_WEB_PUBLIC_DOMAIN
+              value: {{ . | quote }}
+            {{- end }}
           envFrom:
             - secretRef: { name: {{ include "buktio.fullname" . }}-secrets }
           readinessProbe:

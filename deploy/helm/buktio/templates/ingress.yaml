@@ -1,35 +1,69 @@
 {{- if .Values.ingress.enabled }}
+{{- $fullname := include "buktio.fullname" . }}
+{{- $svcPort := dict "web" 3000 "s3proxy" 3900 "api" 8080 }}
+{{- range $h := .Values.ingress.hosts }}
+{{- $svc := default "web" $h.service }}
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "buktio.fullname" . }}
-  labels: {{- include "buktio.labels" . | nindent 4 }}
-  {{- with .Values.ingress.annotations }}
-  annotations: {{- toYaml . | nindent 4 }}
-  {{- end }}
+  name: {{ printf "%s-%s" $fullname ($h.host | replace "." "-" | replace "*" "wildcard") | trunc 63 | trimSuffix "-" }}
+  labels: {{- include "buktio.labels" $ | nindent 4 }}
+  annotations:
+    {{- with $.Values.ingress.clusterIssuer }}
+    cert-manager.io/cluster-issuer: {{ . | quote }}
+    {{- end }}
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/enable-real-ip: "true"
+    nginx.ingress.kubernetes.io/use-forwarded-headers: "true"
+    {{- if $h.cloudflare }}
+    {{- with $.Values.ingress.cloudflareSourceRange }}
+    # Proxied/orange host: only accept traffic from Cloudflare edge IPs.
+    nginx.ingress.kubernetes.io/whitelist-source-range: {{ . | quote }}
+    {{- end }}
+    {{- end }}
+    {{- if eq $svc "s3proxy" }}
+    # S3 uploads can be large; do not cap the body size.
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    {{- end }}
+    {{- with $.Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
-  {{- with .Values.ingress.className }}
+  {{- with $.Values.ingress.className }}
   ingressClassName: {{ . | quote }}
   {{- end }}
-  {{- if .Values.ingress.tls.enabled }}
+  {{- if $h.tls }}
   tls:
-    - hosts: [{{ .Values.ingress.host | quote }}]
-      secretName: {{ .Values.ingress.tls.secretName | quote }}
+    - hosts: [{{ $h.host | quote }}]
+      secretName: {{ $h.tls | quote }}
   {{- end }}
   rules:
-    - host: {{ .Values.ingress.host | quote }}
+    - host: {{ $h.host | quote }}
       http:
         paths:
+          {{- if eq $svc "web" }}
+          # Route /api directly to the API service. The Next.js standalone build
+          # bakes its rewrite destination at build time, so the API base must be
+          # resolved at the edge, not by the web pod's proxy.
           - path: /api
             pathType: Prefix
             backend:
               service:
-                name: {{ include "buktio.fullname" . }}-api
+                name: {{ $fullname }}-api
                 port: { number: 8080 }
+          - path: /scim
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-api
+                port: { number: 8080 }
+          {{- end }}
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: {{ include "buktio.fullname" . }}-web
-                port: { number: 3000 }
+                name: {{ printf "%s-%s" $fullname $svc }}
+                port: { number: {{ index $svcPort $svc }} }
+{{- end }}
 {{- end }}

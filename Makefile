@@ -17,12 +17,17 @@ help:
 
 ## build: build the api and cli binaries
 .PHONY: build
-build: build-api build-cli build-s3proxy
+build: build-api build-api-ee build-cli build-s3proxy
 
 ## build-api: build the OSS REST API server
 .PHONY: build-api
 build-api:
 	$(GO) build -o $(BIN_DIR)/buktio-api ./apps/api/cmd/server
+
+## build-api-ee: build the paid (Pro/Enterprise/Hosted) API server
+.PHONY: build-api-ee
+build-api-ee:
+	$(GO) build -o $(BIN_DIR)/buktio-api-ee ./cmd/buktio-api-ee
 
 ## build-cli: build the product CLI
 .PHONY: build-cli

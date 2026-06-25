@@ -17,11 +17,15 @@ spec:
       labels: {{- include "buktio.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: garage
     spec:
-      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.garage.podSecurityContext }}
+      securityContext: {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: garage
           image: {{ .Values.garage.image | quote }}
-          args: ["/garage", "-c", "/etc/garage.toml", "server"]
+          # --single-node self-bootstraps the layout; buktio's garage-manager then
+          # performs its idempotent Admin-API bootstrap on first boot.
+          args: ["/garage", "-c", "/etc/garage.toml", "server", "--single-node"]
           ports:
             - { name: s3, containerPort: 3900 }
             - { name: rpc, containerPort: 3901 }
@@ -42,6 +46,11 @@ spec:
       volumes:
         - name: config
           configMap: { name: {{ include "buktio.fullname" . }}-garage }
+        {{- if .Values.garage.storage.ephemeral }}
+        - { name: meta, emptyDir: {} }
+        - { name: data, emptyDir: {} }
+        {{- end }}
+  {{- if not .Values.garage.storage.ephemeral }}
   volumeClaimTemplates:
     - metadata: { name: meta }
       spec:
@@ -57,6 +66,7 @@ spec:
         storageClassName: {{ . | quote }}
         {{- end }}
         resources: { requests: { storage: {{ .Values.garage.storage.data.size }} } }
+  {{- end }}
 ---
 apiVersion: v1
 kind: Service
@@ -79,20 +89,23 @@ metadata:
   labels: {{- include "buktio.labels" . | nindent 4 }}
 data:
   garage.toml: |
+    # NON-SENSITIVE. Secrets come from the GARAGE_RPC_SECRET / GARAGE_ADMIN_TOKEN /
+    # GARAGE_METRICS_TOKEN env vars (set from the chart secret), never from this file.
+    # Binds use 0.0.0.0 for reliable pod-to-pod networking.
     metadata_dir = "/var/lib/garage/meta"
     data_dir = "/var/lib/garage/data"
     db_engine = "sqlite"
     replication_factor = {{ .Values.garage.replicationFactor }}
-    rpc_bind_addr = "[::]:3901"
-    rpc_secret_file = "/run/secrets/garage_rpc_secret"
+    consistency_mode = "consistent"
+    rpc_bind_addr = "0.0.0.0:3901"
     [s3_api]
-    api_bind_addr = "[::]:3900"
+    api_bind_addr = "0.0.0.0:3900"
     s3_region = "garage"
     root_domain = ".s3.garage.internal"
     [s3_web]
-    bind_addr = "[::]:3902"
+    bind_addr = "0.0.0.0:3902"
     root_domain = ".web.garage.internal"
+    index = "index.html"
     [admin]
-    api_bind_addr = "[::]:3903"
-    admin_token_file = "/run/secrets/garage_admin_token"
-    metrics_token_file = "/run/secrets/garage_metrics_token"
+    api_bind_addr = "0.0.0.0:3903"
+    metrics_require_token = true

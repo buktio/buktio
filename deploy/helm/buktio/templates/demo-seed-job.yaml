@@ -1,0 +1,120 @@
+{{- if .Values.demo.enabled }}
+{{- $fullname := include "buktio.fullname" . }}
+{{- $api := printf "http://%s-api:8080" $fullname }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullname }}-demo-seed
+  labels: {{- include "buktio.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+data:
+  seed.sh: |
+    #!/bin/sh
+    # Seed a READ-ONLY demo: bootstrap admin, create a sample bucket + objects, then
+    # create a viewer-role login. With edition!=oss + an rbac_enforced license, the
+    # viewer's writes are denied at the API, so the public demo is read-only.
+    # Idempotent: if setup is already initialized, this is a no-op.
+    set -eu
+    API="${API_BASE}"
+    JAR=/tmp/jar.txt
+    csrf() { awk -F'\t' '$6=="buktio_csrf"{print $7}' "$JAR" | tail -n1; }
+
+    echo "==> waiting for API readiness at $API"
+    i=0; until curl -fsS "$API/readyz" >/dev/null 2>&1; do
+      i=$((i+1)); [ "$i" -gt 60 ] && { echo "API not ready after 5m"; exit 1; }
+      sleep 5
+    done
+
+    init=$(curl -fsS "$API/api/v1/setup/status" | grep -oE '"initialized":(true|false)' | cut -d: -f2)
+    if [ "$init" = "true" ]; then
+      echo "==> setup already initialized — demo seed is a no-op"; exit 0
+    fi
+
+    echo "==> creating bootstrap admin"
+    curl -fsS -X POST "$API/api/v1/setup/create-admin" \
+      -H 'Content-Type: application/json' \
+      -d "{\"email\":\"${ADMIN_EMAIL}\",\"password\":\"${ADMIN_PASSWORD}\",\"full_name\":\"Demo Admin\"}" >/dev/null
+
+    echo "==> logging in as admin"
+    curl -fsS -c "$JAR" -X POST "$API/api/v1/auth/login" \
+      -H 'Content-Type: application/json' \
+      -d "{\"email\":\"${ADMIN_EMAIL}\",\"password\":\"${ADMIN_PASSWORD}\"}" >/dev/null
+    CSRF=$(csrf)
+
+    echo "==> creating demo bucket ${DEMO_BUCKET}"
+    BRESP=$(curl -fsS -b "$JAR" -X POST "$API/api/v1/buckets" \
+      -H 'Content-Type: application/json' -H "X-CSRF-Token: $CSRF" \
+      -d "{\"name\":\"${DEMO_BUCKET}\"}")
+    BID=$(echo "$BRESP" | grep -oE '"id":"[a-f0-9-]{36}"' | head -n1 | cut -d'"' -f4)
+    echo "    bucket id: $BID"
+
+    echo "==> uploading sample objects"
+    printf 'Welcome to the buktio read-only demo.\nEverything here is browsable; writes are disabled.\n' \
+      | curl -fsS -b "$JAR" -X PUT "$API/api/v1/buckets/$BID/objects/content?key=README.txt" \
+        -H "X-CSRF-Token: $CSRF" -H 'Content-Type: text/plain' --data-binary @- >/dev/null
+    printf '{"demo":true,"engine":"garage","panel":"buktio"}\n' \
+      | curl -fsS -b "$JAR" -X PUT "$API/api/v1/buckets/$BID/objects/content?key=sample/info.json" \
+        -H "X-CSRF-Token: $CSRF" -H 'Content-Type: application/json' --data-binary @- >/dev/null
+
+    echo "==> creating viewer-role demo login"
+    IRESP=$(curl -fsS -b "$JAR" -X POST "$API/api/v1/members/invite" \
+      -H 'Content-Type: application/json' -H "X-CSRF-Token: $CSRF" \
+      -d "{\"email\":\"${DEMO_EMAIL}\",\"role\":\"viewer\"}")
+    # InviteResult.link is e.g. https://host/accept-invite?token=XXXX
+    TOKEN=$(echo "$IRESP" | grep -oE 'token=[A-Za-z0-9._-]+' | head -n1 | cut -d= -f2)
+    [ -n "$TOKEN" ] || { echo "could not extract invite token from: $IRESP"; exit 1; }
+    curl -fsS -X POST "$API/api/v1/auth/accept-invite" \
+      -H 'Content-Type: application/json' \
+      -d "{\"token\":\"${TOKEN}\",\"password\":\"${DEMO_PASSWORD}\",\"full_name\":\"${DEMO_FULLNAME}\"}" >/dev/null
+
+    echo "==> demo seeded: ${DEMO_EMAIL} (viewer) / bucket ${DEMO_BUCKET}"
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-demo-seed
+  labels: {{- include "buktio.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels: {{- include "buktio.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: demo-seed
+    spec:
+      restartPolicy: Never
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        runAsUser: 100      # curlimages/curl runs as uid 100
+        runAsGroup: 100
+        fsGroup: 100
+      containers:
+        - name: seed
+          image: curlimages/curl:8.10.1
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          command: ["sh", "/seed/seed.sh"]
+          env:
+            - { name: API_BASE,       value: {{ $api | quote }} }
+            - { name: ADMIN_EMAIL,    value: {{ .Values.demo.adminEmail | quote }} }
+            - { name: ADMIN_PASSWORD, value: {{ .Values.demo.adminPassword | default (randAlphaNum 24) | quote }} }
+            - { name: DEMO_EMAIL,     value: {{ .Values.demo.email | quote }} }
+            - { name: DEMO_PASSWORD,  value: {{ required "demo.password is required when demo.enabled" .Values.demo.password | quote }} }
+            - { name: DEMO_FULLNAME,  value: {{ .Values.demo.fullName | quote }} }
+            - { name: DEMO_BUCKET,    value: {{ .Values.demo.bucket | quote }} }
+            - { name: HOME,           value: /tmp }
+          volumeMounts:
+            - { name: seed, mountPath: /seed }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: seed
+          configMap: { name: {{ $fullname }}-demo-seed, defaultMode: 0555 }
+        - name: tmp
+          emptyDir: {}
+{{- end }}

@@ -14,7 +14,11 @@ spec:
         app.kubernetes.io/component: web
     spec:
       serviceAccountName: {{ include "buktio.serviceAccountName" . }}
-      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        runAsUser: {{ .Values.web.runAsUser }}
+        runAsGroup: {{ .Values.web.runAsUser }}
+        fsGroup: {{ .Values.web.runAsUser }}
       containers:
         - name: web
           image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}/{{ .Values.web.image.name }}:{{ include "buktio.imageTag" . }}"
@@ -30,6 +34,13 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 10
           resources: {{- toYaml .Values.web.resources | nindent 12 }}
+          # Next.js standalone needs a writable cache/tmp under readOnlyRootFilesystem.
+          volumeMounts:
+            - { name: cache, mountPath: /app/.next/cache }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: cache, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }
 ---
 apiVersion: v1
 kind: Service

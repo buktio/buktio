@@ -35,6 +35,11 @@ spec:
             periodSeconds: 10
           volumeMounts:
             - { name: data, mountPath: /var/lib/postgresql/data }
+      {{- if .Values.postgres.storage.ephemeral }}
+      volumes:
+        - { name: data, emptyDir: {} }
+      {{- end }}
+  {{- if not .Values.postgres.storage.ephemeral }}
   volumeClaimTemplates:
     - metadata: { name: data }
       spec:
@@ -43,6 +48,7 @@ spec:
         storageClassName: {{ . | quote }}
         {{- end }}
         resources: { requests: { storage: {{ .Values.postgres.storage.size }} } }
+  {{- end }}
 ---
 apiVersion: v1
 kind: Service

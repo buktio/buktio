@@ -9,8 +9,12 @@
 [![Deploy: Docker Compose](https://img.shields.io/badge/Deploy-Docker_Compose-2496ED.svg?logo=docker&logoColor=white)](deploy/docker-compose)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#contributing)
 
-<!-- TODO: add a GIF here showing the core loop: create-bucket -> issue-key -> browse/upload a file -->
-> **TODO: add a screenshot / GIF** of the panel walking through create-bucket → issue an S3 access key → browse and upload a file.
+![buktio — the panel walking through dashboard, buckets, and the object browser](docs/assets/demo.gif)
+
+<p align="center">
+  <img src="docs/assets/02-dashboard.png" alt="Dashboard" width="49%">
+  <img src="docs/assets/04-objects.png" alt="Object browser" width="49%">
+</p>
 
 ---
 

@@ -1,10 +1,20 @@
 buktio {{ .Chart.AppVersion }} ({{ .Values.edition }}) installed as {{ include "buktio.fullname" . }}.
 
 {{- if .Values.ingress.enabled }}
-Open the panel:  https://{{ .Values.ingress.host }}
+Ingress hosts:
+{{- range $h := .Values.ingress.hosts }}
+  https://{{ $h.host }}  →  {{ default "web" $h.service }}{{ if not $h.cloudflare }}  (DNS-only / gray){{ end }}
+{{- end }}
 {{- else }}
 No Ingress was created. Port-forward the web service to reach the panel:
   kubectl port-forward svc/{{ include "buktio.fullname" . }}-web 3000:3000
+{{- end }}
+
+{{- if .Values.demo.enabled }}
+
+Read-only DEMO is enabled. After the seed Job completes, sign in at the demo host with:
+  {{ .Values.demo.email }} / (the password you set in demo.password)
+All write actions return 403 (viewer role + enforced RBAC).
 {{- end }}
 
 Garage runs unmodified and is reachable only inside the cluster (ClusterIP); its

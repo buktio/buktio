@@ -10,9 +10,11 @@
 
 ## Checklist
 
+- [ ] This PR targets the Apache-2.0 core (not the proprietary `ee/` tree)
 - [ ] `make lint` passes (go vet + gofmt)
 - [ ] `make test` passes
 - [ ] Web changes: `cd apps/web && pnpm typecheck && pnpm build` pass
+- [ ] `internal/*` does not import `ee/*`
 - [ ] Docs updated if behavior changed
 - [ ] Commits are signed off (`git commit -s`) — DCO, inbound = outbound (Apache-2.0)
 
