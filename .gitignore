@@ -39,3 +39,10 @@ yarn-debug.log*
 .idea/
 .vscode/
 *.swp
+
+# compiled binaries accidentally built at repo root (use bin/ instead)
+/buktio-api-ee
+/buktio-api
+/buktio
+/buktio-s3proxy
+/keygen
