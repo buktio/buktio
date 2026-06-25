@@ -29,6 +29,11 @@ import { Separator } from "@/components/ui/separator";
 /** SSO browser redirect to the configured IdP — a plain navigation, not a fetch. */
 const SSO_LOGIN_URL = "/api/v1/auth/sso/login";
 
+// Public read-only demo hint. Set at build time (NEXT_PUBLIC_DEMO_*) only for the
+// hosted demo image; empty in normal builds, so self-hosted installs show nothing.
+const DEMO_EMAIL = process.env.NEXT_PUBLIC_DEMO_EMAIL ?? "";
+const DEMO_PASSWORD = process.env.NEXT_PUBLIC_DEMO_PASSWORD ?? "";
+
 export default function LoginPage() {
   const router = useRouter();
   const [submitting, setSubmitting] = React.useState(false);
@@ -51,6 +56,11 @@ export default function LoginPage() {
       active = false;
     };
   }, [router]);
+
+  function fillDemo() {
+    setEmail(DEMO_EMAIL);
+    setPassword(DEMO_PASSWORD);
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -86,6 +96,25 @@ export default function LoginPage() {
           </CardHeader>
           <form onSubmit={onSubmit}>
             <CardContent className="flex flex-col gap-4">
+              {DEMO_EMAIL && (
+                <div className="rounded-md border border-amber-300/60 bg-amber-50 p-3 text-sm dark:border-amber-700/50 dark:bg-amber-950/30">
+                  <p className="font-medium">Read-only demo</p>
+                  <p className="text-muted-foreground mt-0.5">
+                    Sign in with <code className="font-mono">{DEMO_EMAIL}</code> /{" "}
+                    <code className="font-mono">{DEMO_PASSWORD}</code>. Every write action is
+                    disabled.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-2"
+                    onClick={fillDemo}
+                  >
+                    Use demo credentials
+                  </Button>
+                </div>
+              )}
               <div className="grid gap-2">
                 <Label htmlFor="email">Email</Label>
                 <Input

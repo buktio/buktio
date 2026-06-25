@@ -129,6 +129,9 @@ type DriftDTO struct {
 // buckets on the primary cluster are considered (s.Provider is the primary backend),
 // so secondary-cluster buckets do not show up as false drift.
 func (s *Services) ReconcileReport(ctx context.Context) (*DriftDTO, error) {
+	if err := s.authorize(ctx, authz.ActionRead, authz.Target{Kind: authz.ResourceSystem}); err != nil {
+		return nil, err
+	}
 	dbRows, err := s.Store.ListBuckets(ctx, s.tenant(ctx).ProjectID)
 	if err != nil {
 		return nil, mapRepoErr(err)

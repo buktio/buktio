@@ -44,6 +44,9 @@ func (s *Services) CreateAPIToken(ctx context.Context, name string, expiresAt *t
 	if uid == "" {
 		return nil, unauthorizedErr()
 	}
+	if err := s.authorize(ctx, authz.ActionCreate, authz.Target{Kind: authz.ResourceAPIToken}); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(name) == "" {
 		return nil, validationErr("token name is required")
 	}
@@ -94,6 +97,9 @@ func (s *Services) RevokeAPIToken(ctx context.Context, id string) error {
 	uid := currentUserID(ctx)
 	if uid == "" {
 		return unauthorizedErr()
+	}
+	if err := s.authorize(ctx, authz.ActionDelete, authz.Target{Kind: authz.ResourceAPIToken, ID: id}); err != nil {
+		return err
 	}
 	if err := s.Store.SoftDeleteAPIToken(ctx, id, uid); err != nil {
 		return mapRepoErr(err)

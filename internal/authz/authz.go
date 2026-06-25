@@ -44,6 +44,7 @@ const (
 	ResourceAudit     ResourceKind = "audit"
 	ResourceBackup    ResourceKind = "backup"
 	ResourceSettings  ResourceKind = "settings"
+	ResourceAPIToken  ResourceKind = "api_token"
 )
 
 // Subject is the actor a decision is made about.

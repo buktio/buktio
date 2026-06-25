@@ -12,6 +12,11 @@ RUN corepack enable
 COPY --from=deps /app/node_modules ./node_modules
 COPY apps/web/ ./
 ENV NEXT_TELEMETRY_DISABLED=1
+# Optional public read-only-demo hint shown on the login page. Empty in normal
+# builds (no banner); set only for the hosted demo image.
+ARG NEXT_PUBLIC_DEMO_EMAIL=""
+ARG NEXT_PUBLIC_DEMO_PASSWORD=""
+ENV NEXT_PUBLIC_DEMO_EMAIL=$NEXT_PUBLIC_DEMO_EMAIL NEXT_PUBLIC_DEMO_PASSWORD=$NEXT_PUBLIC_DEMO_PASSWORD
 RUN pnpm build
 
 FROM node:22-alpine AS runtime
