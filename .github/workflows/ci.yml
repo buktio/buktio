@@ -4,14 +4,16 @@ name: ci
 # .github/workflows/ci.yml (and drops the monorepo ci.yml). It is intentionally lean
 # and OSS-only — it must never reference the closed paid editions or the signing tool.
 #
-# Image build/push + GoReleaser live in the monorepo ci.yml (source of truth). They
-# are kept out of the public CI until the org's ghcr packages are linked to this repo
-# with write access; until then OSS images are published by the maintainer.
+# go + web run on every push/PR (kept fast and green). The OSS image build/push runs
+# only on version tags or manual dispatch — never on ordinary main pushes — and pushes
+# from THIS repo's Actions so ghcr connects the packages to the repo. GoReleaser stays
+# in the monorepo; public binaries are published by the maintainer.
 
 on:
   pull_request:
   push:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch:
 
 env:
@@ -46,3 +48,44 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
+
+  # OSS image build & push — tags or manual dispatch only (NOT ordinary main pushes).
+  # Pushing from this repo's Actions is what connects the packages to the repo.
+  images:
+    needs: [go, web]
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write }
+    strategy:
+      matrix:
+        include:
+          - { image: buktio-api,     dockerfile: build/api.Dockerfile }
+          - { image: buktio-web,     dockerfile: build/web.Dockerfile }
+          - { image: buktio-s3proxy, dockerfile: build/s3proxy.Dockerfile }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: '${{ github.actor }}', password: '${{ secrets.GITHUB_TOKEN }}' }
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/buktio/${{ matrix.image }}
+          tags: |
+            type=sha
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: VERSION=${{ steps.meta.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
