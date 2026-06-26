@@ -46,6 +46,19 @@ func (h *apiHandlers) register(r chi.Router) {
 		r.Get("/{id}/trash", h.listTrash)
 		r.Post("/{id}/trash/{trashId}/restore", h.restoreTrash)
 		r.Delete("/{id}/trash/{trashId}", h.purgeTrash)
+
+		r.Get("/{id}/webhooks", h.listWebhooks)
+		r.Post("/{id}/webhooks", h.createWebhook)
+		r.Delete("/{id}/webhooks/{whId}", h.deleteWebhook)
+
+		r.Get("/{id}/versioning", h.getVersioning)
+		r.Put("/{id}/versioning", h.setVersioning)
+		r.Get("/{id}/versions", h.listVersions)
+		r.Post("/{id}/versions/restore", h.restoreVersion)
+		r.Delete("/{id}/versions", h.deleteVersion)
+
+		r.Get("/{id}/replications", h.listReplications)
+		r.Post("/{id}/replications", h.startReplication)
 	})
 
 	r.Route("/access-keys", func(r chi.Router) {
@@ -87,6 +100,8 @@ func (h *apiHandlers) register(r chi.Router) {
 
 	r.Get("/dashboard", h.dashboard)
 	r.Get("/usage/traffic", h.trafficUsage)
+	r.Get("/usage/storage", h.storageSeries)
+	r.Get("/usage/buckets", h.bucketUsage)
 	r.Get("/audit", h.listAudit)
 	r.Get("/audit/export", h.exportAudit)
 	r.Get("/audit/verify", h.verifyAudit) // tamper-evidence check (Enterprise)

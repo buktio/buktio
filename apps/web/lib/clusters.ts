@@ -21,6 +21,16 @@ export function providerLabel(provider: ClusterProvider): string {
       return "SeaweedFS";
     case "ceph_rgw":
       return "Ceph RGW";
+    case "wasabi":
+      return "Wasabi";
+    case "storj":
+      return "Storj";
+    case "hetzner":
+      return "Hetzner Object Storage";
+    case "gcs":
+      return "Google Cloud Storage";
+    case "minio":
+      return "MinIO";
     default:
       return provider;
   }
@@ -31,6 +41,11 @@ export const ADDABLE_PROVIDERS: { value: ClusterProvider; label: string }[] = [
   { value: "aws_s3", label: "AWS S3" },
   { value: "r2", label: "Cloudflare R2" },
   { value: "b2", label: "Backblaze B2" },
+  { value: "wasabi", label: "Wasabi" },
+  { value: "storj", label: "Storj" },
+  { value: "hetzner", label: "Hetzner Object Storage" },
+  { value: "gcs", label: "Google Cloud Storage (S3 interop)" },
+  { value: "minio", label: "MinIO" },
   { value: "seaweedfs", label: "SeaweedFS" },
   { value: "ceph_rgw", label: "Ceph RGW" },
 ];
@@ -42,7 +57,14 @@ export function endpointRequired(provider: ClusterProvider): boolean {
 
 /** Default region used when the field is left blank, per provider. */
 export function defaultRegion(provider: ClusterProvider): string {
-  return provider === "r2" ? "auto" : "us-east-1";
+  switch (provider) {
+    case "r2":
+      return "auto";
+    case "hetzner":
+      return "fsn1";
+    default:
+      return "us-east-1";
+  }
 }
 
 /** Resolve the cluster a bucket lives on. Empty/absent cluster_id = primary. */

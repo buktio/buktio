@@ -15,18 +15,31 @@ DATABASE_URL  ?= postgres://buktio:buktio@localhost:5432/buktio?sslmode=disable
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/## //'
 
+# The web panel is embedded into the api binaries (internal/webui). EMBED=0 skips
+# the (slow) web build for fast Go-only iteration, reusing whatever is in dist/.
+EMBED      ?= 1
+EMBED_DEPS := web-embed
+ifeq ($(EMBED),0)
+EMBED_DEPS :=
+endif
+
 ## build: build the api and cli binaries
 .PHONY: build
 build: build-api build-api-ee build-cli build-s3proxy
 
-## build-api: build the OSS REST API server
+## web-embed: build the web static export and embed it into the api binaries
+.PHONY: web-embed
+web-embed:
+	bash scripts/web-embed.sh
+
+## build-api: build the OSS REST API server (embeds the web panel)
 .PHONY: build-api
-build-api:
+build-api: $(EMBED_DEPS)
 	$(GO) build -o $(BIN_DIR)/buktio-api ./apps/api/cmd/server
 
-## build-api-ee: build the paid (Pro/Enterprise/Hosted) API server
+## build-api-ee: build the paid (Pro/Enterprise/Hosted) API server (embeds the web panel)
 .PHONY: build-api-ee
-build-api-ee:
+build-api-ee: $(EMBED_DEPS)
 	$(GO) build -o $(BIN_DIR)/buktio-api-ee ./cmd/buktio-api-ee
 
 ## build-cli: build the product CLI
@@ -99,6 +112,19 @@ down:
 .PHONY: ps
 ps:
 	$(COMPOSE) ps
+
+# --- Lite: single-binary stack (api with embedded UI + garage + postgres, no edge) ---
+COMPOSE_LITE ?= docker compose -f deploy/docker-compose/docker-compose.lite.yml
+
+## lite-up: build & start the LITE single-binary stack (no Caddy; built-in TLS)
+.PHONY: lite-up
+lite-up: gen-env
+	$(COMPOSE_LITE) up -d --build
+
+## lite-down: stop the lite stack (keep volumes)
+.PHONY: lite-down
+lite-down:
+	$(COMPOSE_LITE) down
 
 # --- Local dev: infra (Postgres + Garage) in Docker, API/web run locally ---
 COMPOSE_DEV ?= docker compose -f deploy/docker-compose/docker-compose.dev.yml

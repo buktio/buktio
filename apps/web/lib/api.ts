@@ -235,6 +235,22 @@ export async function presignUpload(
 }
 
 /**
+ * presignShare requests a time-limited presigned GET URL for sharing an object.
+ * The link works wherever the bucket's S3 endpoint is publicly reachable.
+ */
+export async function presignShare(
+  bucketId: string,
+  key: string,
+  expiresIn: number,
+): Promise<PresignResponse> {
+  return apiSend<PresignResponse>("POST", `/buckets/${bucketId}/objects/presign`, {
+    operation: "get",
+    key,
+    expires_in: expiresIn,
+  } satisfies PresignBody);
+}
+
+/**
  * uploadPresigned PUTs a file directly to the (presigned) storage URL using
  * XMLHttpRequest for progress. No cookies or CSRF are sent to the presigned URL.
  */
@@ -559,6 +575,11 @@ export type ClusterProvider =
   | "b2"
   | "seaweedfs"
   | "ceph_rgw"
+  | "wasabi"
+  | "storj"
+  | "hetzner"
+  | "gcs"
+  | "minio"
   | string;
 
 export type ClusterMode = "managed" | "external" | string;
@@ -750,6 +771,116 @@ export interface TrafficRow {
 /** trafficUsage returns per-key request/byte counters over the given window. */
 export function trafficUsage(hours = 24): Promise<ListEnvelope<TrafficRow>> {
   return apiGet<ListEnvelope<TrafficRow>>(`/usage/traffic?hours=${hours}`);
+}
+
+export interface StoragePoint {
+  ts: string;
+  bytes_used: number;
+  object_count: number;
+}
+
+/** storageSeries returns the project's storage totals over the given window. */
+export function storageSeries(hours = 24 * 7): Promise<ListEnvelope<StoragePoint>> {
+  return apiGet<ListEnvelope<StoragePoint>>(`/usage/storage?hours=${hours}`);
+}
+
+export interface BucketUsageRow {
+  bucket_id: string;
+  name: string;
+  bytes_used: number;
+  object_count: number;
+  quota_max_size: number | null;
+  quota_pct: number | null;
+}
+
+/** bucketUsage returns the latest per-bucket usage (largest first) with quota %. */
+export function bucketUsage(): Promise<ListEnvelope<BucketUsageRow>> {
+  return apiGet<ListEnvelope<BucketUsageRow>>(`/usage/buckets`);
+}
+
+export interface WebhookSub {
+  id: string;
+  url: string;
+  events: string[];
+  enabled: boolean;
+  has_secret: boolean;
+  created_at: string;
+}
+
+export const WEBHOOK_EVENTS = ["object.created", "object.deleted"] as const;
+
+export function listWebhooks(bucketId: string): Promise<ListEnvelope<WebhookSub>> {
+  return apiGet<ListEnvelope<WebhookSub>>(`/buckets/${bucketId}/webhooks`);
+}
+
+export function createWebhook(
+  bucketId: string,
+  url: string,
+  events: string[],
+  secret: string,
+): Promise<WebhookSub> {
+  return apiSend<WebhookSub>("POST", `/buckets/${bucketId}/webhooks`, { url, events, secret });
+}
+
+export function deleteWebhook(bucketId: string, id: string): Promise<void> {
+  return apiSend<void>("DELETE", `/buckets/${bucketId}/webhooks/${id}`);
+}
+
+export interface ObjectVersion {
+  key: string;
+  version_id: string;
+  is_latest: boolean;
+  is_delete_marker: boolean;
+  size_bytes: number;
+  last_modified: string;
+  etag: string;
+}
+
+export function getVersioning(bucketId: string): Promise<{ enabled: boolean }> {
+  return apiGet<{ enabled: boolean }>(`/buckets/${bucketId}/versioning`);
+}
+
+export function setVersioning(bucketId: string, enabled: boolean): Promise<{ enabled: boolean }> {
+  return apiSend<{ enabled: boolean }>("PUT", `/buckets/${bucketId}/versioning`, { enabled });
+}
+
+export function listVersions(bucketId: string, prefix = ""): Promise<ListEnvelope<ObjectVersion>> {
+  const qs = prefix ? `?prefix=${encodeURIComponent(prefix)}` : "";
+  return apiGet<ListEnvelope<ObjectVersion>>(`/buckets/${bucketId}/versions${qs}`);
+}
+
+export function restoreVersion(bucketId: string, key: string, versionId: string): Promise<void> {
+  return apiSend<void>("POST", `/buckets/${bucketId}/versions/restore`, {
+    key,
+    version_id: versionId,
+  });
+}
+
+export function deleteVersion(bucketId: string, key: string, versionId: string): Promise<void> {
+  return apiSend<void>("DELETE", `/buckets/${bucketId}/versions`, { key, version_id: versionId });
+}
+
+export interface ReplicationJob {
+  id: string;
+  src_bucket_id: string;
+  dst_bucket_id: string;
+  status: string;
+  copied_objects: number;
+  skipped_objects: number;
+  copied_bytes: number;
+  error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export function listReplications(bucketId: string): Promise<ListEnvelope<ReplicationJob>> {
+  return apiGet<ListEnvelope<ReplicationJob>>(`/buckets/${bucketId}/replications`);
+}
+
+export function startReplication(bucketId: string, dstBucketId: string): Promise<ReplicationJob> {
+  return apiSend<ReplicationJob>("POST", `/buckets/${bucketId}/replications`, {
+    dst_bucket_id: dstBucketId,
+  });
 }
 
 /* ------------------------------------------------------------------ */

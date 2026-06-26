@@ -198,7 +198,7 @@ export default function BucketsPage() {
                   {buckets.map((b) => (
                     <TableRow key={b.id}>
                       <TableCell className="font-medium">
-                        <Link href={`/buckets/${b.id}`} className="hover:underline">
+                        <Link href={`/buckets/detail?id=${b.id}`} className="hover:underline">
                           {b.name}
                         </Link>
                       </TableCell>
@@ -234,7 +234,7 @@ export default function BucketsPage() {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem asChild>
-                              <Link href={`/buckets/${b.id}`}>Open</Link>
+                              <Link href={`/buckets/detail?id=${b.id}`}>Open</Link>
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem

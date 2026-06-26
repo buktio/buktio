@@ -24,10 +24,18 @@ const (
 	KindB2        = "b2"
 	KindSeaweedFS = "seaweedfs"
 	KindCephRGW   = "ceph_rgw"
+	KindWasabi    = "wasabi"
+	KindStorj     = "storj"
+	KindHetzner   = "hetzner"
+	KindGCS       = "gcs"
+	KindMinIO     = "minio"
 )
 
 func init() {
-	for _, k := range []string{KindAWSS3, KindR2, KindB2, KindSeaweedFS, KindCephRGW} {
+	for _, k := range []string{
+		KindAWSS3, KindR2, KindB2, KindSeaweedFS, KindCephRGW,
+		KindWasabi, KindStorj, KindHetzner, KindGCS, KindMinIO,
+	} {
 		storage.Register(k, newProvider)
 	}
 }
@@ -199,4 +207,22 @@ func (p *Provider) GetLifecycle(ctx context.Context, bucket string) ([]storage.L
 }
 func (p *Provider) DeleteLifecycle(ctx context.Context, bucket string) error {
 	return p.s3.DeleteLifecycle(ctx, bucket)
+}
+
+// --- object versioning (s3core) ---
+
+func (p *Provider) GetBucketVersioning(ctx context.Context, bucket string) (bool, error) {
+	return p.s3.GetBucketVersioning(ctx, bucket)
+}
+func (p *Provider) SetBucketVersioning(ctx context.Context, bucket string, enabled bool) error {
+	return p.s3.SetBucketVersioning(ctx, bucket, enabled)
+}
+func (p *Provider) ListObjectVersions(ctx context.Context, bucket, prefix string) ([]storage.ObjectVersion, error) {
+	return p.s3.ListObjectVersions(ctx, bucket, prefix)
+}
+func (p *Provider) DeleteObjectVersion(ctx context.Context, bucket, key, versionID string) error {
+	return p.s3.DeleteObjectVersion(ctx, bucket, key, versionID)
+}
+func (p *Provider) RestoreObjectVersion(ctx context.Context, bucket, key, versionID string) error {
+	return p.s3.RestoreObjectVersion(ctx, bucket, key, versionID)
 }

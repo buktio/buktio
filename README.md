@@ -119,6 +119,8 @@ buktio is open-core: the OSS core is fully functional with **no artificial limit
 
 Paid modules are **new capabilities** (for teams and companies) — never the removal of something that was free. Licensing is offline (no phone-home). A separately operated **Hosted/SaaS** edition adds self-serve signup with email verification, per-tenant cluster provisioning, usage-based billing (storage GB-month + egress + requests, via Stripe), and resumable S3-to-S3 migration import.
 
+See the [roadmap](docs/ROADMAP.md) for what's planned next in the free core (and what stays free).
+
 ## Architecture
 
 ```

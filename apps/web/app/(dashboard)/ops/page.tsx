@@ -1,10 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { Cell, Pie, PieChart } from "recharts";
+import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, XAxis, YAxis } from "recharts";
 import {
   Activity,
   AlertCircle,
+  Database,
   HardDrive,
   Layers,
   RefreshCw,
@@ -12,7 +13,16 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { fetchGarageMetrics, trafficUsage, ApiError, type TrafficRow } from "@/lib/api";
+import {
+  fetchGarageMetrics,
+  trafficUsage,
+  storageSeries,
+  bucketUsage,
+  ApiError,
+  type TrafficRow,
+  type StoragePoint,
+  type BucketUsageRow,
+} from "@/lib/api";
 import { formatBytes, formatNumber } from "@/lib/format";
 import { PageHeader } from "@/app/(dashboard)/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -28,8 +38,17 @@ import {
   ChartContainer,
   ChartLegend,
   ChartLegendContent,
+  ChartTooltip,
+  ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -117,11 +136,24 @@ const diskChartConfig = {
   free: { label: "Free", color: "var(--chart-2)" },
 } satisfies ChartConfig;
 
+const storageChartConfig = {
+  bytes_used: { label: "Stored", color: "var(--chart-1)" },
+} satisfies ChartConfig;
+
+const PERIODS = [
+  { label: "24 hours", hours: 24 },
+  { label: "7 days", hours: 24 * 7 },
+  { label: "30 days", hours: 24 * 30 },
+];
+
 export default function OpsPage() {
   const [metrics, setMetrics] = React.useState<Metrics | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [failed, setFailed] = React.useState(false);
   const [traffic, setTraffic] = React.useState<TrafficRow[] | null>(null);
+  const [period, setPeriod] = React.useState(24 * 7);
+  const [series, setSeries] = React.useState<StoragePoint[] | null>(null);
+  const [buckets, setBuckets] = React.useState<BucketUsageRow[] | null>(null);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -143,11 +175,44 @@ export default function OpsPage() {
       setTraffic([]);
       toast.error(err instanceof ApiError ? err.message : "Failed to load traffic");
     }
+
+    try {
+      const res = await bucketUsage();
+      setBuckets(res.data);
+    } catch {
+      setBuckets([]);
+    }
   }, []);
 
   React.useEffect(() => {
     load();
   }, [load]);
+
+  // Storage-growth series reloads whenever the period changes.
+  React.useEffect(() => {
+    let cancelled = false;
+    setSeries(null);
+    storageSeries(period)
+      .then((res) => !cancelled && setSeries(res.data))
+      .catch(() => !cancelled && setSeries([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [period]);
+
+  const seriesData = React.useMemo(
+    () =>
+      (series ?? []).map((p) => ({
+        ts: p.ts,
+        label: new Date(p.ts).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+        bytes_used: p.bytes_used,
+      })),
+    [series],
+  );
+  const maxBucketBytes = React.useMemo(
+    () => Math.max(1, ...(buckets ?? []).map((b) => b.bytes_used)),
+    [buckets],
+  );
 
   const diskUsed =
     metrics?.diskTotal != null && metrics?.diskAvail != null
@@ -278,6 +343,116 @@ export default function OpsPage() {
             </div>
           </>
         )}
+
+        <Card>
+          <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+            <div className="space-y-1.5">
+              <CardTitle>Storage over time</CardTitle>
+              <CardDescription>
+                Total stored bytes across all buckets, sampled every few minutes.
+              </CardDescription>
+            </div>
+            <Select value={String(period)} onValueChange={(v) => setPeriod(Number(v))}>
+              <SelectTrigger className="w-36">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PERIODS.map((p) => (
+                  <SelectItem key={p.hours} value={String(p.hours)}>
+                    {p.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </CardHeader>
+          <CardContent>
+            {series === null ? (
+              <Skeleton className="h-56 w-full" />
+            ) : seriesData.length === 0 ? (
+              <p className="text-muted-foreground text-sm">
+                No usage samples yet for this period. The collector snapshots usage every few
+                minutes.
+              </p>
+            ) : (
+              <ChartContainer config={storageChartConfig} className="aspect-auto h-56 w-full">
+                <AreaChart data={seriesData} margin={{ left: 4, right: 8, top: 8 }}>
+                  <CartesianGrid vertical={false} />
+                  <XAxis
+                    dataKey="label"
+                    tickLine={false}
+                    axisLine={false}
+                    minTickGap={32}
+                    tickMargin={8}
+                  />
+                  <YAxis
+                    tickLine={false}
+                    axisLine={false}
+                    width={64}
+                    tickFormatter={(v) => formatBytes(Number(v))}
+                  />
+                  <ChartTooltip
+                    content={
+                      <ChartTooltipContent
+                        labelKey="ts"
+                        formatter={(value) => formatBytes(Number(value))}
+                      />
+                    }
+                  />
+                  <Area
+                    dataKey="bytes_used"
+                    type="monotone"
+                    fill="var(--color-bytes_used)"
+                    fillOpacity={0.2}
+                    stroke="var(--color-bytes_used)"
+                  />
+                </AreaChart>
+              </ChartContainer>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Storage by bucket</CardTitle>
+            <CardDescription>
+              Largest buckets first. A bar shows quota utilisation where a quota is set, otherwise
+              the size relative to the largest bucket.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {buckets === null ? (
+              <Skeleton className="h-32 w-full" />
+            ) : buckets.length === 0 ? (
+              <p className="text-muted-foreground text-sm">No bucket usage recorded yet.</p>
+            ) : (
+              <div className="flex flex-col gap-4">
+                {buckets.slice(0, 10).map((b) => {
+                  const pct =
+                    b.quota_pct != null
+                      ? Math.min(100, b.quota_pct)
+                      : (b.bytes_used / maxBucketBytes) * 100;
+                  return (
+                    <div key={b.bucket_id} className="flex flex-col gap-1.5">
+                      <div className="flex items-center justify-between gap-2 text-sm">
+                        <span className="flex min-w-0 items-center gap-2 font-medium">
+                          <Database className="text-muted-foreground size-3.5 shrink-0" />
+                          <span className="truncate">{b.name}</span>
+                        </span>
+                        <span className="text-muted-foreground shrink-0 tabular-nums">
+                          {formatBytes(b.bytes_used)}
+                          {b.quota_max_size != null && (
+                            <> / {formatBytes(b.quota_max_size)} ({(b.quota_pct ?? 0).toFixed(0)}%)</>
+                          )}
+                        </span>
+                      </div>
+                      <Progress value={pct} />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>

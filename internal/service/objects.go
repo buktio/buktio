@@ -83,9 +83,18 @@ func (s *Services) DeleteObjects(ctx context.Context, bucketID string, keys []st
 			return mapStorageErr(err)
 		}
 		s.audit(ctx, "object.delete", "bucket", bucketID, map[string]any{"count": len(keys), "permanent": true})
+		for _, k := range keys {
+			s.fireWebhook(bucketID, EventObjectDeleted, k)
+		}
 		return nil
 	}
-	return s.trashObjects(ctx, b, keys)
+	if err := s.trashObjects(ctx, b, keys); err != nil {
+		return err
+	}
+	for _, k := range keys {
+		s.fireWebhook(bucketID, EventObjectDeleted, k)
+	}
+	return nil
 }
 
 // HeadObject returns an object's metadata.
@@ -117,6 +126,7 @@ func (s *Services) CopyObject(ctx context.Context, bucketID, srcKey, dstKey stri
 		return mapStorageErr(gerr)
 	}
 	s.audit(ctx, "object.copy", "bucket", bucketID, map[string]any{"src": srcKey, "dst": dstKey})
+	s.fireWebhook(bucketID, EventObjectCreated, dstKey)
 	return nil
 }
 
@@ -140,6 +150,8 @@ func (s *Services) MoveObject(ctx context.Context, bucketID, srcKey, dstKey stri
 		return mapStorageErr(gerr)
 	}
 	s.audit(ctx, "object.move", "bucket", bucketID, map[string]any{"src": srcKey, "dst": dstKey})
+	s.fireWebhook(bucketID, EventObjectCreated, dstKey)
+	s.fireWebhook(bucketID, EventObjectDeleted, srcKey)
 	return nil
 }
 
@@ -168,6 +180,7 @@ func (s *Services) PutObjectStream(ctx context.Context, bucketID, key string, bo
 	}
 	s.audit(ctx, "object.upload", "bucket", bucketID, map[string]any{"key": key, "sse_c": ssecKeyB64 != ""})
 	s.emit(ctx, metering.EventObjectUploaded, bucketID, size)
+	s.fireWebhook(bucketID, EventObjectCreated, key)
 	return nil
 }
 

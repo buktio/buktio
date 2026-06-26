@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { HardDrive, Info, Loader2, Plus, Server, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -81,8 +81,16 @@ function roleLabel(role: ClusterNode["role"]): string {
 }
 
 export default function ClusterDetailPage() {
-  const params = useParams<{ id: string }>();
-  const id = params.id;
+  // useSearchParams must be read inside a Suspense boundary for static export.
+  return (
+    <React.Suspense fallback={<div className="flex flex-1 flex-col gap-4 p-4 md:p-6" />}>
+      <ClusterDetail />
+    </React.Suspense>
+  );
+}
+
+function ClusterDetail() {
+  const id = useSearchParams().get("id") ?? "";
 
   const [cluster, setCluster] = React.useState<Cluster | null>(null);
   const [notFound, setNotFound] = React.useState(false);

@@ -34,7 +34,7 @@
 
 	# Panel (default).
 	handle {
-		reverse_proxy web:3000
+		reverse_proxy api:8080
 	}
 }
 
@@ -62,6 +62,6 @@ https:// {
 		reverse_proxy api:8080
 	}
 	handle {
-		reverse_proxy web:3000
+		reverse_proxy api:8080
 	}
 }

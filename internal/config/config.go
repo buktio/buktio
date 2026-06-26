@@ -54,6 +54,22 @@ type HTTPConfig struct {
 	WriteTimeout time.Duration
 	// PanelOrigins is the allow-list of browser origins for CORS (never "*").
 	PanelOrigins []string
+	// TLS configures the optional built-in HTTPS listener (single-binary, edge-less
+	// deployments). Default "off" — terminate TLS at a reverse proxy.
+	TLS TLSConfig
+}
+
+// TLSConfig controls the built-in HTTPS listener. It exists so the single-binary
+// "lite" deployment (no Caddy/edge proxy) can serve HTTPS directly:
+//   - "off"  (default): plaintext HTTP; terminate TLS at an edge proxy.
+//   - "self": an in-memory self-signed certificate (browser warning expected) —
+//     handy for a quick private/homelab setup.
+//   - "auto": Let's Encrypt via ACME for the configured public Domains.
+type TLSConfig struct {
+	Mode     string   // off | self | auto
+	Domains  []string // required for "auto"; also added as SANs for "self"
+	CacheDir string   // ACME certificate cache directory ("auto")
+	Email    string   // optional ACME account email ("auto")
 }
 
 // DBConfig configures the PostgreSQL connection.
@@ -105,6 +121,12 @@ func Load() (*Config, error) {
 			ReadTimeout:  envDuration("BUKTIO_HTTP_READ_TIMEOUT", defaultReadTimeout),
 			WriteTimeout: envDuration("BUKTIO_HTTP_WRITE_TIMEOUT", defaultWriteTimeout),
 			PanelOrigins: envList("BUKTIO_PANEL_ORIGINS"),
+			TLS: TLSConfig{
+				Mode:     env("BUKTIO_TLS", "off"),
+				Domains:  envList("BUKTIO_TLS_DOMAIN"),
+				CacheDir: env("BUKTIO_TLS_CACHE_DIR", "/var/lib/buktio/tls"),
+				Email:    env("BUKTIO_TLS_EMAIL", ""),
+			},
 		},
 		DB: DBConfig{
 			URL: os.Getenv("DATABASE_URL"),
@@ -135,6 +157,15 @@ func (c *Config) validate() error {
 	case "debug", "info", "warn", "error":
 	default:
 		return fmt.Errorf("config: invalid BUKTIO_LOG_LEVEL %q", c.LogLevel)
+	}
+	switch c.HTTP.TLS.Mode {
+	case "", "off", "self":
+	case "auto":
+		if len(c.HTTP.TLS.Domains) == 0 {
+			return fmt.Errorf("config: BUKTIO_TLS=auto requires BUKTIO_TLS_DOMAIN")
+		}
+	default:
+		return fmt.Errorf("config: invalid BUKTIO_TLS %q (want off|self|auto)", c.HTTP.TLS.Mode)
 	}
 	return nil
 }

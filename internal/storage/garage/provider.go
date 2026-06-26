@@ -281,3 +281,21 @@ func (p *Provider) GetLifecycle(ctx context.Context, bucket string) ([]storage.L
 func (p *Provider) DeleteLifecycle(ctx context.Context, bucket string) error {
 	return p.s3.DeleteLifecycle(ctx, bucket)
 }
+
+// --- object versioning: unsupported on Garage (capability advertised false) ---
+
+func (p *Provider) GetBucketVersioning(ctx context.Context, bucket string) (bool, error) {
+	return false, storage.ErrUnsupported
+}
+func (p *Provider) SetBucketVersioning(ctx context.Context, bucket string, enabled bool) error {
+	return storage.ErrUnsupported
+}
+func (p *Provider) ListObjectVersions(ctx context.Context, bucket, prefix string) ([]storage.ObjectVersion, error) {
+	return nil, storage.ErrUnsupported
+}
+func (p *Provider) DeleteObjectVersion(ctx context.Context, bucket, key, versionID string) error {
+	return storage.ErrUnsupported
+}
+func (p *Provider) RestoreObjectVersion(ctx context.Context, bucket, key, versionID string) error {
+	return storage.ErrUnsupported
+}

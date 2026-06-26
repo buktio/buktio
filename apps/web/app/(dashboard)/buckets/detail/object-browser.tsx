@@ -4,9 +4,12 @@ import * as React from "react";
 import {
   Copy,
   Download,
+  Eye,
   File as FileIcon,
   Folder,
+  FolderUp,
   Home,
+  Link2,
   Loader2,
   Lock,
   PencilLine,
@@ -26,6 +29,7 @@ import {
   copyObject,
   moveObject,
   presignUpload,
+  presignShare,
   uploadPresigned,
   random32B64,
   PRESIGN_THRESHOLD_BYTES,
@@ -35,6 +39,13 @@ import {
   type ObjectsResponse,
   type S3Object,
 } from "@/lib/api";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { formatBytes, formatDate } from "@/lib/format";
 import { CopyButton } from "@/components/copy-button";
 import {
@@ -98,6 +109,34 @@ function fileName(key: string): string {
   return idx === -1 ? key : key.slice(idx + 1);
 }
 
+type PreviewKind = "image" | "video" | "audio" | "text" | "none";
+
+function previewKind(key: string): PreviewKind {
+  const ext = key.slice(key.lastIndexOf(".") + 1).toLowerCase();
+  if (["png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "ico"].includes(ext)) return "image";
+  if (["mp4", "webm", "mov", "m4v", "ogv"].includes(ext)) return "video";
+  if (["mp3", "wav", "ogg", "oga", "flac", "m4a", "aac"].includes(ext)) return "audio";
+  if (
+    ["txt", "md", "markdown", "json", "yaml", "yml", "toml", "csv", "log", "xml", "html",
+     "css", "js", "ts", "tsx", "jsx", "go", "py", "sh", "rs", "sql", "ini", "conf", "env"].includes(ext)
+  ) {
+    return "text";
+  }
+  return "none";
+}
+
+const SHARE_TTLS = [
+  { label: "15 minutes", value: 900 },
+  { label: "1 hour", value: 3600 },
+  { label: "24 hours", value: 86400 },
+  { label: "7 days", value: 604800 },
+];
+
+/** relPath preserves folder structure for directory (webkitdirectory) uploads. */
+function relPath(file: File): string {
+  return (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+}
+
 interface UploadJob {
   name: string;
   pct: number;
@@ -130,6 +169,14 @@ export function ObjectBrowser({
   const [moveState, setMoveState] = React.useState<MoveDialogState | null>(null);
   const [movePending, setMovePending] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const folderInputRef = React.useRef<HTMLInputElement>(null);
+  const [preview, setPreview] = React.useState<{ key: string } | null>(null);
+  const [share, setShare] = React.useState<{
+    key: string;
+    ttl: number;
+    url: string | null;
+    loading: boolean;
+  } | null>(null);
 
   // SSE-C (client-side encryption) state.
   const [ssecEnabled, setSsecEnabled] = React.useState(false);
@@ -159,6 +206,16 @@ export function ObjectBrowser({
   React.useEffect(() => {
     load(prefix);
   }, [load, prefix]);
+
+  // webkitdirectory/directory aren't in React's input typings; set them imperatively
+  // so the second file input picks an entire folder (preserving relative paths).
+  React.useEffect(() => {
+    const el = folderInputRef.current;
+    if (el) {
+      el.setAttribute("webkitdirectory", "");
+      el.setAttribute("directory", "");
+    }
+  }, []);
 
   const crumbs = React.useMemo(() => {
     if (!prefix) return [];
@@ -193,35 +250,38 @@ export function ObjectBrowser({
     }
 
     setUploading(true);
-    setUploadJobs(list.map((f) => ({ name: f.name, pct: 0, status: "uploading" })));
+    // For folder uploads, the job name is the relative path so nested files are
+    // distinguishable and tracked correctly.
+    setUploadJobs(list.map((f) => ({ name: relPath(f), pct: 0, status: "uploading" })));
     let ok = 0;
     try {
       for (const file of list) {
-        const objKey = prefix + file.name;
+        const name = relPath(file);
+        const objKey = prefix + name;
         try {
           if (ssecEnabled) {
             // SSE-C uploads must go through the API (header-based key).
             await apiUploadProgress(objectUploadPath(bucketId, objKey), file, {
               ssecKeyB64: key,
-              onProgress: (pct) => setJobProgress(file.name, pct, "uploading"),
+              onProgress: (pct) => setJobProgress(name, pct, "uploading"),
             });
           } else if (file.size > PRESIGN_THRESHOLD_BYTES) {
             // Large files: presign a PUT and upload directly to storage.
             const presigned = await presignUpload(bucketId, objKey, file.type);
             await uploadPresigned(presigned.url, file, (pct) =>
-              setJobProgress(file.name, pct, "uploading"),
+              setJobProgress(name, pct, "uploading"),
             );
           } else {
             await apiUploadProgress(objectUploadPath(bucketId, objKey), file, {
-              onProgress: (pct) => setJobProgress(file.name, pct, "uploading"),
+              onProgress: (pct) => setJobProgress(name, pct, "uploading"),
             });
           }
-          setJobProgress(file.name, 100, "done");
+          setJobProgress(name, 100, "done");
           ok += 1;
         } catch (err) {
-          setJobProgress(file.name, 0, "error");
+          setJobProgress(name, 0, "error");
           toast.error(
-            err instanceof ApiError ? `${file.name}: ${err.message}` : `Failed to upload ${file.name}`,
+            err instanceof ApiError ? `${name}: ${err.message}` : `Failed to upload ${name}`,
           );
         }
       }
@@ -314,6 +374,18 @@ export function ObjectBrowser({
     }
   }
 
+  async function generateShareLink() {
+    if (!share) return;
+    setShare((s) => (s ? { ...s, loading: true, url: null } : s));
+    try {
+      const res = await presignShare(bucketId, share.key, share.ttl);
+      setShare((s) => (s ? { ...s, loading: false, url: res.url } : s));
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Failed to create share link");
+      setShare((s) => (s ? { ...s, loading: false } : s));
+    }
+  }
+
   function toggleSelect(key: string, checked: boolean) {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -369,19 +441,39 @@ export function ObjectBrowser({
               <span className="font-mono">{prefix || `${bucketName}/`}</span>
             </span>
           </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={uploading}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            {uploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
-            Browse files
-          </Button>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={uploading}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {uploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+              Browse files
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={uploading}
+              onClick={() => folderInputRef.current?.click()}
+            >
+              <FolderUp className="size-4" />
+              Upload folder
+            </Button>
+          </div>
           <input
             ref={fileInputRef}
             type="file"
             multiple
+            hidden
+            onChange={(e) => {
+              if (e.target.files?.length) uploadFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          <input
+            ref={folderInputRef}
+            type="file"
             hidden
             onChange={(e) => {
               if (e.target.files?.length) uploadFiles(e.target.files);
@@ -577,7 +669,7 @@ export function ObjectBrowser({
                   <TableHead>Name</TableHead>
                   <TableHead className="text-right">Size</TableHead>
                   <TableHead>Modified</TableHead>
-                  <TableHead className="w-28" />
+                  <TableHead className="w-52" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -622,6 +714,17 @@ export function ObjectBrowser({
                     </TableCell>
                     <TableCell>
                       <div className="flex justify-end gap-1">
+                        {previewKind(o.key) !== "none" && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-8"
+                            onClick={() => setPreview({ key: o.key })}
+                          >
+                            <Eye className="size-4" />
+                            <span className="sr-only">Preview</span>
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="icon"
@@ -630,6 +733,15 @@ export function ObjectBrowser({
                         >
                           <Download className="size-4" />
                           <span className="sr-only">Download</span>
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-8"
+                          onClick={() => setShare({ key: o.key, ttl: 3600, url: null, loading: false })}
+                        >
+                          <Link2 className="size-4" />
+                          <span className="sr-only">Share link</span>
                         </Button>
                         <Button
                           variant="ghost"
@@ -746,6 +858,129 @@ export function ObjectBrowser({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Object preview */}
+      <Dialog open={!!preview} onOpenChange={(o) => !o && setPreview(null)}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="truncate">
+              {preview ? fileName(preview.key) : ""}
+            </DialogTitle>
+            <DialogDescription className="font-mono text-xs break-all">
+              {preview?.key}
+            </DialogDescription>
+          </DialogHeader>
+          {preview && <ObjectPreview bucketId={bucketId} objectKey={preview.key} />}
+        </DialogContent>
+      </Dialog>
+
+      {/* Share link (presigned GET, time-limited) */}
+      <Dialog open={!!share} onOpenChange={(o) => !o && setShare(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Share link</DialogTitle>
+            <DialogDescription className="font-mono text-xs break-all">
+              {share?.key}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 py-2">
+            <div className="grid gap-2">
+              <Label>Link expires after</Label>
+              <Select
+                value={String(share?.ttl ?? 3600)}
+                onValueChange={(v) =>
+                  setShare((s) => (s ? { ...s, ttl: Number(v), url: null } : s))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SHARE_TTLS.map((t) => (
+                    <SelectItem key={t.value} value={String(t.value)}>
+                      {t.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {share?.url && (
+              <div className="grid gap-2">
+                <Label>Presigned URL</Label>
+                <div className="flex gap-2">
+                  <Input readOnly value={share.url} className="font-mono text-xs" />
+                  <CopyButton value={share.url} variant="outline" label="Copy link" />
+                </div>
+                <p className="text-muted-foreground text-xs">
+                  Anyone with this link can download the object until it expires. It resolves
+                  wherever the bucket&apos;s S3 endpoint is publicly reachable.
+                </p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShare(null)}>
+              Close
+            </Button>
+            <Button onClick={generateShareLink} disabled={share?.loading}>
+              {share?.loading && <Loader2 className="size-4 animate-spin" />}
+              {share?.url ? "Regenerate" : "Generate link"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
+}
+
+/** ObjectPreview renders an inline preview by file kind. Text content is fetched
+ *  same-origin (auth cookie); media uses the streamed content URL directly. */
+function ObjectPreview({ bucketId, objectKey }: { bucketId: string; objectKey: string }) {
+  const kind = previewKind(objectKey);
+  const url = objectContentUrl(bucketId, objectKey);
+  const [text, setText] = React.useState<string | null>(null);
+  const [err, setErr] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (kind !== "text") return;
+    let cancelled = false;
+    setText(null);
+    setErr(null);
+    fetch(url, { credentials: "same-origin" })
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((t) => !cancelled && setText(t.slice(0, 200_000)))
+      .catch((e: unknown) => !cancelled && setErr(e instanceof Error ? e.message : "load failed"));
+    return () => {
+      cancelled = true;
+    };
+  }, [url, kind]);
+
+  const frame = "max-h-[60vh] w-full overflow-auto rounded-md border bg-muted/30";
+
+  if (kind === "image") {
+    return (
+      <div className={cn(frame, "flex items-center justify-center p-2")}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={url} alt={objectKey} className="max-h-[58vh] object-contain" />
+      </div>
+    );
+  }
+  if (kind === "video") {
+    return <video src={url} controls className="max-h-[60vh] w-full rounded-md border" />;
+  }
+  if (kind === "audio") {
+    return <audio src={url} controls className="w-full" />;
+  }
+  if (kind === "text") {
+    if (err) return <p className="text-destructive text-sm">Preview failed: {err}</p>;
+    if (text === null) {
+      return (
+        <div className="text-muted-foreground flex items-center gap-2 text-sm">
+          <Loader2 className="size-4 animate-spin" /> Loading…
+        </div>
+      );
+    }
+    return <pre className={cn(frame, "p-3 text-xs break-words whitespace-pre-wrap")}>{text}</pre>;
+  }
+  return <p className="text-muted-foreground text-sm">No inline preview for this file type.</p>;
 }

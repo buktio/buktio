@@ -61,6 +61,7 @@ type AddClusterInput struct {
 
 var genericKinds = map[string]bool{
 	"aws_s3": true, "r2": true, "b2": true, "seaweedfs": true, "ceph_rgw": true,
+	"wasabi": true, "storj": true, "hetzner": true, "gcs": true, "minio": true,
 }
 
 func (s *Services) clusterToDTO(ctx context.Context, c *repository.Cluster) ClusterDTO {
@@ -120,7 +121,7 @@ func (s *Services) AddCluster(ctx context.Context, in AddClusterInput) (*Cluster
 		return nil, validationErr("name is required")
 	}
 	if !genericKinds[in.Provider] {
-		return nil, validationErr("provider must be one of: aws_s3, r2, b2, seaweedfs, ceph_rgw")
+		return nil, validationErr("provider must be one of: aws_s3, r2, b2, seaweedfs, ceph_rgw, wasabi, storj, hetzner, gcs, minio")
 	}
 	if in.AccessKeyID == "" || in.SecretAccessKey == "" {
 		return nil, validationErr("access key id and secret are required")

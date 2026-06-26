@@ -1,7 +1,15 @@
-# buktio — primary install path.
+# buktio — FULL install path (edge proxy + S3 subdomains + public websites).
 #
 #   cp .env.example .env   # then fill in generated secrets (see README)
 #   docker compose up -d
+#
+# The web panel is embedded in the api binary (no separate web container); Caddy
+# routes both /api/* and the panel to the api service. Caddy also serves the
+# s3.<domain> (presigned URLs, metered via s3proxy) and *.web.<domain> (public
+# bucket websites) routes — which is why this stack keeps Caddy.
+#
+# For the minimal single-binary homelab setup (api + garage + postgres, no Caddy,
+# built-in TLS), use docker-compose.lite.yml instead.
 #
 # Garage runs UNMODIFIED, pinned by tag, and is NEVER host-published: its S3
 # (:3900) and Admin (:3903) ports are reachable only on the internal network,
@@ -30,26 +38,7 @@ services:
     # *.web.<domain> routes used by presigned URLs and public websites).
     networks: [buktio_edge, buktio_internal]
     depends_on:
-      web: { condition: service_healthy }
       api: { condition: service_healthy }
-
-  web:
-    image: buktio/web:${BUKTIO_VERSION:-dev}
-    build:
-      context: ../..
-      dockerfile: build/web.Dockerfile
-    <<: *restart
-    environment:
-      - BUKTIO_API_URL=http://api:8080
-    networks: [buktio_edge, buktio_internal]
-    depends_on:
-      api: { condition: service_healthy }
-    healthcheck:
-      # 127.0.0.1 (not localhost): the Next server binds IPv4 0.0.0.0 only.
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
-      interval: 10s
-      timeout: 5s
-      retries: 6
 
   api:
     image: buktio/api:${BUKTIO_VERSION:-dev}

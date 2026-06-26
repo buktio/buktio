@@ -217,7 +217,7 @@ export default function ClustersPage() {
                       <TableRow key={c.id}>
                         <TableCell className="font-medium">
                           <span className="flex items-center gap-2">
-                            <Link href={`/clusters/${c.id}`} className="hover:underline">
+                            <Link href={`/clusters/detail?id=${c.id}`} className="hover:underline">
                               {c.name}
                             </Link>
                             {c.is_primary && (
@@ -246,7 +246,7 @@ export default function ClustersPage() {
                         <TableCell>
                           <div className="flex items-center justify-end gap-1">
                             <Button variant="ghost" size="icon" className="size-8" asChild>
-                              <Link href={`/clusters/${c.id}`}>
+                              <Link href={`/clusters/detail?id=${c.id}`}>
                                 <Settings className="size-4" />
                                 <span className="sr-only">Manage backend</span>
                               </Link>

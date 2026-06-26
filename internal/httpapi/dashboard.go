@@ -32,6 +32,30 @@ func (h *apiHandlers) trafficUsage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, listEnvelope{Data: rows})
 }
 
+func (h *apiHandlers) storageSeries(w http.ResponseWriter, r *http.Request) {
+	hours := 24 * 7
+	if v := r.URL.Query().Get("hours"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			hours = n
+		}
+	}
+	pts, err := h.svc.StorageSeries(r.Context(), hours)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, listEnvelope{Data: pts})
+}
+
+func (h *apiHandlers) bucketUsage(w http.ResponseWriter, r *http.Request) {
+	rows, err := h.svc.BucketUsage(r.Context())
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, listEnvelope{Data: rows})
+}
+
 func auditFilterFromQuery(r *http.Request) service.AuditFilterInput {
 	q := r.URL.Query()
 	f := service.AuditFilterInput{

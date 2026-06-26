@@ -10,12 +10,14 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/buktio/buktio/internal/observability"
 	"github.com/buktio/buktio/internal/service"
+	"github.com/buktio/buktio/internal/webui"
 )
 
 // ReadinessProbe reports the health of buktio's dependencies. The map is
@@ -115,6 +117,24 @@ func New(d Deps) http.Handler {
 			h.register(r)
 		})
 	})
+
+	// Embedded web panel (single-binary delivery). Any request not matched by the
+	// API, probes, metrics or SCIM falls through here: the UI handler serves the
+	// static export and SPA-falls-back to index.html. Unknown /api/ paths keep a
+	// JSON 404 instead of getting the HTML shell.
+	if ui, err := webui.Handler(); err != nil {
+		d.Logger.Error("web panel disabled: failed to init embedded UI", slog.Any("error", err))
+	} else {
+		r.NotFound(func(w http.ResponseWriter, req *http.Request) {
+			if strings.HasPrefix(req.URL.Path, "/api/") {
+				writeJSON(w, http.StatusNotFound, errEnvelope{Error: errBody{
+					Code: "not_found", Message: "no such endpoint",
+				}})
+				return
+			}
+			ui.ServeHTTP(w, req)
+		})
+	}
 
 	return r
 }

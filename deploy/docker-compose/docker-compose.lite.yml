@@ -1,0 +1,98 @@
+# buktio — LITE install path (single binary, no edge proxy).
+#
+#   cp .env.example .env   # then fill in generated secrets (see README)
+#   docker compose -f docker-compose.lite.yml up -d
+#
+# The smallest useful buktio: just the api (with the web panel embedded) plus its
+# Postgres and the hidden Garage engine. The api publishes 80/443 itself and
+# terminates TLS in-process (BUKTIO_TLS):
+#   off  — plaintext HTTP on :80 (put it behind your own proxy / VPN)
+#   self — self-signed HTTPS on :443 (browser warning; fine for private/homelab)
+#   auto — Let's Encrypt on :443 for BUKTIO_TLS_DOMAIN (needs a public DNS name)
+#
+# Trade-off vs the full stack: no s3.<domain> / *.web.<domain> routing and no
+# per-key egress metering proxy. Presigned URLs and public-website hosting need the
+# full stack (docker-compose.yml). SQLite (Postgres-less) lands in a later release.
+name: buktio
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+  api:
+    image: buktio/api:${BUKTIO_VERSION:-dev}
+    build:
+      context: ../..
+      dockerfile: build/api.Dockerfile
+    <<: *restart
+    env_file: [.env]
+    environment:
+      - DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      - GARAGE_ADMIN_URL=http://garage:3903
+      - GARAGE_S3_URL=http://garage:3900
+      - GARAGE_S3_REGION=garage
+      # Built-in TLS for the single-binary deployment. Override in .env:
+      #   BUKTIO_TLS=auto and BUKTIO_TLS_DOMAIN=panel.example.com for Let's Encrypt.
+      - BUKTIO_TLS=${BUKTIO_TLS:-self}
+      - BUKTIO_TLS_DOMAIN=${BUKTIO_TLS_DOMAIN:-}
+      - BUKTIO_TLS_CACHE_DIR=/var/lib/buktio/tls
+      - BUKTIO_HTTP_ADDR=:443
+      - BUKTIO_BACKUP_DIR=/var/lib/buktio/backups
+    ports:
+      - "80:80"     # ACME http-01 challenge + http→https redirect (BUKTIO_TLS=auto)
+      - "443:443"
+    volumes:
+      - app_config:/etc/buktio
+      - backups:/var/lib/buktio/backups
+      - tls_cache:/var/lib/buktio/tls
+    networks: [buktio_internal]
+    depends_on:
+      postgres: { condition: service_healthy }
+      garage:   { condition: service_started }
+    healthcheck:
+      test: ["CMD", "wget", "--no-check-certificate", "-qO-", "https://127.0.0.1:443/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  postgres:
+    image: postgres:16
+    <<: *restart
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks: [buktio_internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  garage:
+    image: dxflrs/garage:v2.3.0          # PINNED. never :latest
+    <<: *restart
+    environment:
+      - GARAGE_RPC_SECRET=${GARAGE_RPC_SECRET}
+      - GARAGE_ADMIN_TOKEN=${GARAGE_ADMIN_TOKEN}
+      - GARAGE_METRICS_TOKEN=${GARAGE_METRICS_TOKEN}
+    volumes:
+      - ./garage.toml:/etc/garage.toml:ro
+      - garage_meta:/var/lib/garage/meta
+      - garage_data:/var/lib/garage/data
+    networks: [buktio_internal]
+    command: ["/garage", "-c", "/etc/garage.toml", "server", "--single-node"]
+
+networks:
+  buktio_internal:
+    internal: false   # the api publishes host ports in this profile
+
+volumes:
+  pg_data:
+  garage_meta:
+  garage_data:
+  app_config:
+  backups:
+  tls_cache:

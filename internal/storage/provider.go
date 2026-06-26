@@ -90,6 +90,18 @@ type Object struct {
 	IsPrefix     bool // a CommonPrefix when delimiter="/" folder browsing
 }
 
+// ObjectVersion is one version (or delete marker) of an object on a
+// versioning-enabled backend.
+type ObjectVersion struct {
+	Key            string
+	VersionID      string
+	IsLatest       bool
+	IsDeleteMarker bool
+	Size           int64
+	LastModified   time.Time
+	ETag           string
+}
+
 // ListObjectsInput parameterizes an object listing.
 type ListObjectsInput struct {
 	Prefix            string
@@ -248,4 +260,13 @@ type StorageProvider interface {
 	SetLifecycle(ctx context.Context, bucketID string, rules []LifecycleRule) error
 	GetLifecycle(ctx context.Context, bucketID string) ([]LifecycleRule, error)
 	DeleteLifecycle(ctx context.Context, bucketID string) error
+
+	// Object versioning (capability ObjectVersioning). Backends without it (Garage)
+	// return ErrUnsupported so the UI hides the Versions tab.
+	GetBucketVersioning(ctx context.Context, bucketID string) (bool, error)
+	SetBucketVersioning(ctx context.Context, bucketID string, enabled bool) error
+	ListObjectVersions(ctx context.Context, bucketID, prefix string) ([]ObjectVersion, error)
+	DeleteObjectVersion(ctx context.Context, bucketID, key, versionID string) error
+	// RestoreObjectVersion makes the given version the current one (server-side copy).
+	RestoreObjectVersion(ctx context.Context, bucketID, key, versionID string) error
 }

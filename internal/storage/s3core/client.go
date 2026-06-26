@@ -227,6 +227,80 @@ func (c *Client) CopyObject(ctx context.Context, bucket, srcKey, dstKey string) 
 	return err
 }
 
+// --- object versioning ---
+
+func (c *Client) GetBucketVersioning(ctx context.Context, bucket string) (bool, error) {
+	out, err := c.client.GetBucketVersioning(ctx, &s3.GetBucketVersioningInput{Bucket: aws.String(bucket)})
+	if err != nil {
+		return false, err
+	}
+	return out.Status == s3types.BucketVersioningStatusEnabled, nil
+}
+
+func (c *Client) SetBucketVersioning(ctx context.Context, bucket string, enabled bool) error {
+	status := s3types.BucketVersioningStatusSuspended
+	if enabled {
+		status = s3types.BucketVersioningStatusEnabled
+	}
+	_, err := c.client.PutBucketVersioning(ctx, &s3.PutBucketVersioningInput{
+		Bucket:                  aws.String(bucket),
+		VersioningConfiguration: &s3types.VersioningConfiguration{Status: status},
+	})
+	return err
+}
+
+func (c *Client) ListObjectVersions(ctx context.Context, bucket, prefix string) ([]storage.ObjectVersion, error) {
+	in := &s3.ListObjectVersionsInput{Bucket: aws.String(bucket)}
+	if prefix != "" {
+		in.Prefix = aws.String(prefix)
+	}
+	out, err := c.client.ListObjectVersions(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	versions := make([]storage.ObjectVersion, 0, len(out.Versions)+len(out.DeleteMarkers))
+	for _, v := range out.Versions {
+		versions = append(versions, storage.ObjectVersion{
+			Key:          aws.ToString(v.Key),
+			VersionID:    aws.ToString(v.VersionId),
+			IsLatest:     aws.ToBool(v.IsLatest),
+			Size:         aws.ToInt64(v.Size),
+			LastModified: aws.ToTime(v.LastModified),
+			ETag:         strings.Trim(aws.ToString(v.ETag), `"`),
+		})
+	}
+	for _, d := range out.DeleteMarkers {
+		versions = append(versions, storage.ObjectVersion{
+			Key:            aws.ToString(d.Key),
+			VersionID:      aws.ToString(d.VersionId),
+			IsLatest:       aws.ToBool(d.IsLatest),
+			IsDeleteMarker: true,
+			LastModified:   aws.ToTime(d.LastModified),
+		})
+	}
+	return versions, nil
+}
+
+func (c *Client) DeleteObjectVersion(ctx context.Context, bucket, key, versionID string) error {
+	_, err := c.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket:    aws.String(bucket),
+		Key:       aws.String(key),
+		VersionId: aws.String(versionID),
+	})
+	return err
+}
+
+// RestoreObjectVersion copies an old version onto the current key, making it the
+// newest version (the prior current version is preserved in history).
+func (c *Client) RestoreObjectVersion(ctx context.Context, bucket, key, versionID string) error {
+	_, err := c.client.CopyObject(ctx, &s3.CopyObjectInput{
+		Bucket:     aws.String(bucket),
+		Key:        aws.String(key),
+		CopySource: aws.String(bucket + "/" + key + "?versionId=" + versionID),
+	})
+	return err
+}
+
 func (c *Client) PutObject(ctx context.Context, bucket, key string, body io.Reader, size int64, contentType string) error {
 	input := &s3.PutObjectInput{
 		Bucket: aws.String(bucket),

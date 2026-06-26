@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"sort"
 	"time"
 )
 
@@ -32,5 +33,68 @@ func (s *Services) TrafficUsage(ctx context.Context, hours int) ([]TrafficDTO, e
 			Requests: r.Requests, BytesIn: r.BytesIn, BytesOut: r.BytesOut,
 		})
 	}
+	return out, nil
+}
+
+// StoragePointDTO is one interval of the storage-growth series.
+type StoragePointDTO struct {
+	TS          time.Time `json:"ts"`
+	BytesUsed   int64     `json:"bytes_used"`
+	ObjectCount int64     `json:"object_count"`
+}
+
+// StorageSeries returns the project's storage totals over the last `hours` hours,
+// bucketed into ~48 intervals (step >= the 5-min collector cadence). Drives the
+// dashboard storage-growth chart.
+func (s *Services) StorageSeries(ctx context.Context, hours int) ([]StoragePointDTO, error) {
+	if hours <= 0 {
+		hours = 24 * 7
+	}
+	step := hours * 3600 / 48
+	if step < 300 {
+		step = 300
+	}
+	since := time.Now().Add(-time.Duration(hours) * time.Hour)
+	pts, err := s.Store.StorageSeries(ctx, s.tenant(ctx).ProjectID, since, step)
+	if err != nil {
+		return nil, mapRepoErr(err)
+	}
+	out := make([]StoragePointDTO, 0, len(pts))
+	for _, p := range pts {
+		out = append(out, StoragePointDTO{TS: p.TS, BytesUsed: p.BytesUsed, ObjectCount: p.ObjectCount})
+	}
+	return out, nil
+}
+
+// BucketUsageDTO is per-bucket usage with quota utilisation for the dashboard.
+type BucketUsageDTO struct {
+	BucketID     string   `json:"bucket_id"`
+	Name         string   `json:"name"`
+	BytesUsed    int64    `json:"bytes_used"`
+	ObjectCount  int64    `json:"object_count"`
+	QuotaMaxSize *int64   `json:"quota_max_size"`
+	QuotaPct     *float64 `json:"quota_pct"`
+}
+
+// BucketUsage returns the latest per-bucket usage in the project, largest first,
+// with quota utilisation where a quota is set.
+func (s *Services) BucketUsage(ctx context.Context) ([]BucketUsageDTO, error) {
+	rows, err := s.Store.BucketUsageList(ctx, s.tenant(ctx).ProjectID)
+	if err != nil {
+		return nil, mapRepoErr(err)
+	}
+	out := make([]BucketUsageDTO, 0, len(rows))
+	for _, r := range rows {
+		d := BucketUsageDTO{
+			BucketID: r.BucketID, Name: r.Name,
+			BytesUsed: r.BytesUsed, ObjectCount: r.ObjectCount, QuotaMaxSize: r.QuotaMaxSize,
+		}
+		if r.QuotaMaxSize != nil && *r.QuotaMaxSize > 0 {
+			pct := float64(r.BytesUsed) / float64(*r.QuotaMaxSize) * 100
+			d.QuotaPct = &pct
+		}
+		out = append(out, d)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].BytesUsed > out[j].BytesUsed })
 	return out, nil
 }

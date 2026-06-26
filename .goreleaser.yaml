@@ -10,6 +10,9 @@ project_name: buktio
 before:
   hooks:
     - go mod tidy
+    # Build the web static export and embed it into internal/webui/dist so the
+    # published buktio-api binaries ship the panel inside a single binary.
+    - bash scripts/web-embed.sh
 
 builds:
   # CLI — the primary end-user binary (status/logs/restart/doctor/backup/restore/upgrade/cluster).
@@ -83,6 +86,29 @@ changelog:
     - { title: Performance, regexp: '^.*?perf(\(.+\))??!?:.+$', order: 2 }
     - { title: Others, order: 999 }
 
+# Linux packages (.deb/.rpm) for the CLI. Only the `buktio` CLI is packaged as an
+# OS package — the api/s3proxy ship as container images and release archives. This
+# lets users `apt install ./buktio_*.deb` / `dnf install ./buktio_*.rpm`.
+nfpms:
+  - id: buktio-cli
+    package_name: buktio
+    ids: [buktio]
+    vendor: buktio
+    homepage: https://buktio.org
+    maintainer: buktio maintainers <noreply@buktio.org>
+    description: |
+      buktio — a free, self-hosted control plane for S3-compatible object storage
+      (web panel + REST API + CLI), with Garage as the default hidden engine.
+    license: Apache-2.0
+    formats: [deb, rpm]
+    bindir: /usr/bin
+    section: utils
+    contents:
+      - src: LICENSE
+        dst: /usr/share/doc/buktio/LICENSE
+      - src: NOTICE
+        dst: /usr/share/doc/buktio/NOTICE
+
 release:
   github:
     owner: buktio
@@ -91,4 +117,23 @@ release:
   draft: true
   prerelease: auto
 
-# nfpms (.deb/.rpm packaging of the CLI) is reserved for a future release.
+# Homebrew tap for the CLI: `brew install buktio/tap/buktio`.
+# To ENABLE: (1) create the public repo buktio/homebrew-tap, (2) add a
+# HOMEBREW_TAP_GITHUB_TOKEN secret (repo-scoped PAT) to the release workflow env,
+# then (3) uncomment this block. Left disabled so releases don't fail before the
+# tap exists.
+# brews:
+#   - name: buktio
+#     ids: [default]
+#     repository:
+#       owner: buktio
+#       name: homebrew-tap
+#       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+#     homepage: https://buktio.org
+#     description: "Self-hosted control plane for S3-compatible object storage (CLI)"
+#     license: Apache-2.0
+#     skip_upload: auto
+#     install: |
+#       bin.install "buktio"
+#     test: |
+#       system "#{bin}/buktio", "--help"

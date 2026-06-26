@@ -58,13 +58,13 @@ jobs:
     permissions: { contents: read, packages: write }
     strategy:
       fail-fast: false   # one image failing must not cancel the others' push
-      # Go images (api/s3proxy) cross-compile natively, so they stay multi-arch.
-      # The web image is amd64-only: building Next.js/SWC for linux/arm64 under QEMU
-      # emulation SIGILLs the build worker on the amd64 runner. amd64 builds natively.
+      # The web panel is now embedded into the api binary (internal/webui); there is
+      # no separate web image. Every image is fully multi-arch: the api Dockerfile
+      # runs the Next.js/SWC build on the native $BUILDPLATFORM (never under QEMU,
+      # which used to SIGILL on arm64) and Go cross-compiles to each target arch.
       matrix:
         include:
           - { image: buktio-api,     dockerfile: build/api.Dockerfile,     platforms: 'linux/amd64,linux/arm64' }
-          - { image: buktio-web,     dockerfile: build/web.Dockerfile,     platforms: 'linux/amd64' }
           - { image: buktio-s3proxy, dockerfile: build/s3proxy.Dockerfile, platforms: 'linux/amd64,linux/arm64' }
     steps:
       - uses: actions/checkout@v4

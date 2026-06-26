@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 
@@ -415,10 +416,23 @@ export function BucketSettings({
             </div>
           </div>
           {!canQuota && <UnsupportedNote />}
-          <p className="text-muted-foreground text-xs">
-            Currently using {formatBytes(bucket.usage.bytes_used)} across{" "}
-            {formatNumber(bucket.usage.objects)} objects.
-          </p>
+          {bucket.quota.max_bytes && bucket.quota.max_bytes > 0 ? (
+            <div className="flex flex-col gap-1.5">
+              <Progress
+                value={Math.min(100, (bucket.usage.bytes_used / bucket.quota.max_bytes) * 100)}
+              />
+              <p className="text-muted-foreground text-xs">
+                {formatBytes(bucket.usage.bytes_used)} of {formatBytes(bucket.quota.max_bytes)} (
+                {((bucket.usage.bytes_used / bucket.quota.max_bytes) * 100).toFixed(0)}%) across{" "}
+                {formatNumber(bucket.usage.objects)} objects.
+              </p>
+            </div>
+          ) : (
+            <p className="text-muted-foreground text-xs">
+              Currently using {formatBytes(bucket.usage.bytes_used)} across{" "}
+              {formatNumber(bucket.usage.objects)} objects.
+            </p>
+          )}
         </CardContent>
         <CardFooter>
           <Button onClick={saveQuota} disabled={savingQuota || !canQuota}>

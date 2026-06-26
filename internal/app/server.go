@@ -103,8 +103,9 @@ func RunServer(version string, enf Enforcers) error {
 		go func() { defer bg.Done(); svc.RunBackupScheduler(ctx, 1*time.Minute) }()   // Pro-M8
 		go func() { defer bg.Done(); svc.RunTenantControlLoop(ctx, 1*time.Minute) }() // Hosted-M3
 		go func() { defer bg.Done(); svc.RunBillingReporter(ctx, 1*time.Hour) }()     // Hosted-M4
-		// Resume any migration jobs interrupted by a restart (from their cursor).
-		svc.ResumeMigrations(ctx) // Hosted-M5
+		// Resume any migration / replication jobs interrupted by a restart (from cursor).
+		svc.ResumeMigrations(ctx)   // Hosted-M5
+		svc.ResumeReplications(ctx) // v2.6 cross-backend replication
 		defer func() { stop(); bg.Wait(); pool.Close() }()
 	}
 
@@ -139,8 +140,10 @@ func RunServer(version string, enf Enforcers) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		logger.Info("listening", slog.String("addr", cfg.HTTP.Addr))
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.Info("listening",
+			slog.String("addr", cfg.HTTP.Addr),
+			slog.String("tls", cfg.HTTP.TLS.Mode))
+		if err := serveWithTLS(srv, cfg.HTTP.TLS, logger); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
 	}()

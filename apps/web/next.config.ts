@@ -1,14 +1,15 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Emit a self-contained server bundle for the Docker runtime image.
-  output: "standalone",
-  // The browser talks to the Go API through this rewrite (same-origin in prod the
-  // edge proxy fronts /api/*; in dev we proxy to the API directly).
-  async rewrites() {
-    const apiUrl = process.env.BUKTIO_API_URL ?? "http://localhost:8080";
-    return [{ source: "/api/:path*", destination: `${apiUrl}/api/:path*` }];
-  },
+  // Static HTML/JS export — the whole UI is a client-side SPA that gets embedded
+  // into the Go binary (internal/webui) and served same-origin alongside /api/*,
+  // so no Node runtime and no /api rewrite are needed in production.
+  output: "export",
+  // Dynamic segments (buckets/[id], clusters/[id]) read their id client-side via
+  // useParams; the embedding Go handler serves index.html as the SPA fallback for
+  // any unmatched route, so deep-links resolve through client-side routing.
+  trailingSlash: true,
+  images: { unoptimized: true },
 };
 
 export default nextConfig;

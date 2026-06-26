@@ -1,0 +1,98 @@
+# buktio — Portainer stack (lite single-binary install).
+#
+# Portainer → Stacks → Add stack → Web editor: paste this, then set the
+# environment variables below (generate the secrets — see deploy/appstores/README.md).
+#
+# Provides the api (web panel embedded) + its Postgres + the hidden Garage engine.
+# The api terminates TLS itself (BUKTIO_TLS, default self-signed on :443).
+name: buktio
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+  api:
+    image: ghcr.io/buktio/buktio-api:latest
+    <<: *restart
+    environment:
+      - DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      - GARAGE_ADMIN_URL=http://garage:3903
+      - GARAGE_S3_URL=http://garage:3900
+      - GARAGE_S3_REGION=garage
+      - BUKTIO_MASTER_KEY=${BUKTIO_MASTER_KEY}
+      - BUKTIO_TLS=${BUKTIO_TLS:-self}
+      - BUKTIO_TLS_DOMAIN=${BUKTIO_TLS_DOMAIN:-}
+      - BUKTIO_TLS_CACHE_DIR=/var/lib/buktio/tls
+      - BUKTIO_HTTP_ADDR=:443
+      - BUKTIO_BACKUP_DIR=/var/lib/buktio/backups
+    ports:
+      - "80:80"     # ACME http-01 + http→https redirect (BUKTIO_TLS=auto)
+      - "443:443"
+    volumes:
+      - app_config:/etc/buktio
+      - backups:/var/lib/buktio/backups
+      - tls_cache:/var/lib/buktio/tls
+    depends_on:
+      postgres: { condition: service_healthy }
+      garage:   { condition: service_started }
+
+  postgres:
+    image: postgres:16
+    <<: *restart
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  garage:
+    image: dxflrs/garage:v2.3.0
+    <<: *restart
+    environment:
+      - GARAGE_RPC_SECRET=${GARAGE_RPC_SECRET}
+      - GARAGE_ADMIN_TOKEN=${GARAGE_ADMIN_TOKEN}
+      - GARAGE_METRICS_TOKEN=${GARAGE_METRICS_TOKEN}
+    configs:
+      - source: garage_toml
+        target: /etc/garage.toml
+    volumes:
+      - garage_meta:/var/lib/garage/meta
+      - garage_data:/var/lib/garage/data
+    command: ["/garage", "-c", "/etc/garage.toml", "server", "--single-node"]
+
+# Inlined so the stack is self-contained (no local file needed in Portainer).
+configs:
+  garage_toml:
+    content: |
+      metadata_dir = "/var/lib/garage/meta"
+      data_dir     = "/var/lib/garage/data"
+      db_engine    = "sqlite"
+      replication_factor = 1
+      consistency_mode   = "consistent"
+      rpc_bind_addr   = "0.0.0.0:3901"
+      rpc_public_addr = "127.0.0.1:3901"
+      [s3_api]
+      api_bind_addr = "0.0.0.0:3900"
+      s3_region     = "garage"
+      root_domain   = ".s3.localhost"
+      [s3_web]
+      bind_addr   = "0.0.0.0:3902"
+      root_domain = ".web.localhost"
+      index       = "index.html"
+      [admin]
+      api_bind_addr         = "0.0.0.0:3903"
+      metrics_require_token = true
+
+volumes:
+  pg_data:
+  garage_meta:
+  garage_data:
+  app_config:
+  backups:
+  tls_cache:

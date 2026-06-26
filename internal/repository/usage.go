@@ -51,6 +51,83 @@ func (s *Store) LatestUsageForBucket(ctx context.Context, bucketID string) (byte
 	return bytesUsed, objectCount, nil
 }
 
+// StoragePoint is one interval of the storage-growth series.
+type StoragePoint struct {
+	TS          time.Time
+	BytesUsed   int64
+	ObjectCount int64
+}
+
+// StorageSeries returns project storage totals bucketed into stepSeconds-wide
+// intervals since `since`. Within each interval it takes the latest snapshot per
+// bucket, then sums across buckets — so the series tracks total stored bytes/objects
+// over time. (Postgres-specific; SQLite support is deferred.)
+func (s *Store) StorageSeries(ctx context.Context, projectID string, since time.Time, stepSeconds int) ([]StoragePoint, error) {
+	const q = `
+WITH bucketed AS (
+  SELECT
+    to_timestamp(floor(extract(epoch from captured_at) / $2) * $2) AS ts,
+    bucket_id, bytes_used, object_count,
+    row_number() OVER (
+      PARTITION BY to_timestamp(floor(extract(epoch from captured_at) / $2) * $2), bucket_id
+      ORDER BY captured_at DESC
+    ) AS rn
+  FROM usage_snapshots
+  WHERE project_id=$1::uuid AND captured_at >= $3
+)
+SELECT ts, COALESCE(sum(bytes_used),0), COALESCE(sum(object_count),0)
+FROM bucketed WHERE rn=1
+GROUP BY ts ORDER BY ts`
+	rows, err := s.q(ctx).Query(ctx, q, projectID, stepSeconds, since)
+	if err != nil {
+		return nil, fmt.Errorf("repository: storage series: %w", err)
+	}
+	defer rows.Close()
+	var out []StoragePoint
+	for rows.Next() {
+		var p StoragePoint
+		if err := rows.Scan(&p.TS, &p.BytesUsed, &p.ObjectCount); err != nil {
+			return nil, fmt.Errorf("repository: storage series scan: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// BucketUsageRow is the latest usage + quota for one bucket.
+type BucketUsageRow struct {
+	BucketID     string
+	Name         string
+	BytesUsed    int64
+	ObjectCount  int64
+	QuotaMaxSize *int64
+}
+
+// BucketUsageList returns the latest snapshot per live bucket in a project.
+func (s *Store) BucketUsageList(ctx context.Context, projectID string) ([]BucketUsageRow, error) {
+	const q = `
+SELECT DISTINCT ON (s.bucket_id)
+  s.bucket_id, b.name, s.bytes_used, s.object_count, s.quota_max_size
+FROM usage_snapshots s
+JOIN buckets b ON b.id = s.bucket_id
+WHERE s.project_id=$1::uuid AND b.deleted_at IS NULL
+ORDER BY s.bucket_id, s.captured_at DESC`
+	rows, err := s.q(ctx).Query(ctx, q, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("repository: bucket usage list: %w", err)
+	}
+	defer rows.Close()
+	var out []BucketUsageRow
+	for rows.Next() {
+		var r BucketUsageRow
+		if err := rows.Scan(&r.BucketID, &r.Name, &r.BytesUsed, &r.ObjectCount, &r.QuotaMaxSize); err != nil {
+			return nil, fmt.Errorf("repository: bucket usage scan: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // ProjectUsageTotals sums the latest-per-bucket usage across a project.
 func (s *Store) ProjectUsageTotals(ctx context.Context, projectID string) (bytesUsed, objectCount int64, err error) {
 	const q = `

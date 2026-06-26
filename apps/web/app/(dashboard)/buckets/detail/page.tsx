@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -18,11 +18,14 @@ import { clusterForBucket, providerLabel } from "@/lib/clusters";
 import { PageHeader } from "@/app/(dashboard)/page-header";
 import { VisibilityBadge } from "@/components/visibility-badge";
 import { Badge } from "@/components/ui/badge";
-import { ObjectBrowser } from "@/app/(dashboard)/buckets/[id]/object-browser";
-import { BucketSettings } from "@/app/(dashboard)/buckets/[id]/bucket-settings";
-import { BucketConnection } from "@/app/(dashboard)/buckets/[id]/bucket-connection";
-import { BucketCors } from "@/app/(dashboard)/buckets/[id]/bucket-cors";
-import { BucketTrash } from "@/app/(dashboard)/buckets/[id]/bucket-trash";
+import { ObjectBrowser } from "@/app/(dashboard)/buckets/detail/object-browser";
+import { BucketSettings } from "@/app/(dashboard)/buckets/detail/bucket-settings";
+import { BucketConnection } from "@/app/(dashboard)/buckets/detail/bucket-connection";
+import { BucketCors } from "@/app/(dashboard)/buckets/detail/bucket-cors";
+import { BucketTrash } from "@/app/(dashboard)/buckets/detail/bucket-trash";
+import { BucketWebhooks } from "@/app/(dashboard)/buckets/detail/bucket-webhooks";
+import { BucketVersions } from "@/app/(dashboard)/buckets/detail/bucket-versions";
+import { BucketReplication } from "@/app/(dashboard)/buckets/detail/bucket-replication";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -39,8 +42,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function BucketDetailPage() {
-  const params = useParams<{ id: string }>();
-  const id = params.id;
+  // useSearchParams must be read inside a Suspense boundary for static export.
+  return (
+    <React.Suspense fallback={<div className="flex flex-1 flex-col gap-4 p-4 md:p-6" />}>
+      <BucketDetail />
+    </React.Suspense>
+  );
+}
+
+function BucketDetail() {
+  const id = useSearchParams().get("id") ?? "";
   const router = useRouter();
   const [bucket, setBucket] = React.useState<Bucket | null>(null);
   const [clusters, setClusters] = React.useState<Cluster[]>([]);
@@ -150,6 +161,11 @@ export default function BucketDetailPage() {
                 {(!capabilities || capabilities.bucket_cors) && (
                   <TabsTrigger value="cors">CORS</TabsTrigger>
                 )}
+                {capabilities?.object_versioning && (
+                  <TabsTrigger value="versions">Versions</TabsTrigger>
+                )}
+                <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
+                <TabsTrigger value="replication">Replication</TabsTrigger>
                 <TabsTrigger value="connection">Connection</TabsTrigger>
               </TabsList>
 
@@ -174,6 +190,20 @@ export default function BucketDetailPage() {
                   <BucketCors bucketId={bucket.id} />
                 </TabsContent>
               )}
+
+              {capabilities?.object_versioning && (
+                <TabsContent value="versions" className="mt-4">
+                  <BucketVersions bucketId={bucket.id} />
+                </TabsContent>
+              )}
+
+              <TabsContent value="webhooks" className="mt-4">
+                <BucketWebhooks bucketId={bucket.id} />
+              </TabsContent>
+
+              <TabsContent value="replication" className="mt-4">
+                <BucketReplication bucketId={bucket.id} />
+              </TabsContent>
 
               <TabsContent value="connection" className="mt-4">
                 <BucketConnection bucketId={bucket.id} />
