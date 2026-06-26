@@ -17,6 +17,10 @@ go.work.sum
 secrets.env
 *.key
 *.pem
+# The license-VERIFICATION public key is not secret — it must be tracked so the
+# ee licensing package compiles (it is embedded in every paid binary). The private
+# signing key never lives in the repo.
+!ee/licensing/pubkey.pem
 
 
 # Node / Next.js

@@ -130,7 +130,7 @@ func (s *Store) WriteAudit(ctx context.Context, orgID, actorUserID, actorType, a
 	if err != nil {
 		return fmt.Errorf("repository: audit begin: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, orgLockKey(orgID)); err != nil {
 		return fmt.Errorf("repository: audit lock: %w", err)

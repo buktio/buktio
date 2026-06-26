@@ -17,7 +17,7 @@ func (s *Store) CreateOrgWithOwner(ctx context.Context, orgName, orgSlug, email,
 	if err != nil {
 		return "", "", "", fmt.Errorf("repository: signup begin: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	if err = tx.QueryRow(ctx,
 		`INSERT INTO organizations (name, slug) VALUES ($1,$2) RETURNING id::text`, orgName, orgSlug,
@@ -64,7 +64,7 @@ func (s *Store) ConsumeEmailVerification(ctx context.Context, tokenHash []byte) 
 	if err != nil {
 		return "", fmt.Errorf("repository: verify begin: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	var userID string
 	err = tx.QueryRow(ctx,

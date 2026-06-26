@@ -21,7 +21,7 @@ func (s *Store) EnsureDefaultTenant(ctx context.Context) (*DefaultTenant, error)
 	if err != nil {
 		return nil, fmt.Errorf("repository: begin: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	var orgID string
 	err = tx.QueryRow(ctx, `SELECT id::text FROM organizations WHERE slug='default' AND deleted_at IS NULL`).Scan(&orgID)
