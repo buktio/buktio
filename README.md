@@ -158,4 +158,4 @@ Found a vulnerability? Please report it responsibly — see [SECURITY.md](SECURI
 - **Repository:** https://github.com/buktio/buktio
 - **Website:** https://buktio.org
 - **Live read-only demo:** https://demo.buktio.org — sign in with `demo@buktio.org` / `ReadOnlyDemo!` (viewer; all writes are disabled)
-- **Download:** [latest release](https://github.com/buktio/buktio/releases/latest) · `docker pull ghcr.io/buktio/buktio-api:v2.1.0`
+- **Download:** [latest release](https://github.com/buktio/buktio/releases/latest) · `docker pull ghcr.io/buktio/buktio-api:latest`
