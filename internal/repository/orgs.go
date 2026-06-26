@@ -140,14 +140,16 @@ func (s *Store) SetOrgQuota(ctx context.Context, orgID string, maxBytes *int64) 
 
 // OrgUsageTotals sums the latest-per-bucket usage across an entire org.
 func (s *Store) OrgUsageTotals(ctx context.Context, orgID string) (bytesUsed, objectCount int64, err error) {
+	// row_number() window keeps the latest snapshot per bucket — portable across
+	// Postgres and SQLite (DISTINCT ON is Postgres-only).
 	const q = `
 WITH latest AS (
-  SELECT DISTINCT ON (bucket_id) bucket_id, bytes_used, object_count
+  SELECT bytes_used, object_count,
+         row_number() OVER (PARTITION BY bucket_id ORDER BY captured_at DESC) AS rn
   FROM usage_snapshots
   WHERE org_id=$1::uuid
-  ORDER BY bucket_id, captured_at DESC
 )
-SELECT COALESCE(sum(bytes_used),0), COALESCE(sum(object_count),0) FROM latest`
+SELECT COALESCE(sum(bytes_used),0), COALESCE(sum(object_count),0) FROM latest WHERE rn=1`
 	err = s.q(ctx).QueryRow(ctx, q, orgID).Scan(&bytesUsed, &objectCount)
 	if err != nil {
 		return 0, 0, nil

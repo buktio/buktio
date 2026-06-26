@@ -23,7 +23,7 @@ type TrashItem struct {
 
 const trashCols = `id::text, bucket_id::text, org_id::text, original_key, trash_key, size_bytes, deleted_at, purge_after`
 
-func scanTrash(row pgx.Row) (*TrashItem, error) {
+func scanTrash(row DBRow) (*TrashItem, error) {
 	var t TrashItem
 	err := row.Scan(&t.ID, &t.BucketID, &t.OrgID, &t.OriginalKey, &t.TrashKey, &t.SizeBytes, &t.DeletedAt, &t.PurgeAfter)
 	if errors.Is(err, pgx.ErrNoRows) {

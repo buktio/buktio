@@ -24,7 +24,7 @@ type BackupSchedule struct {
 const scheduleCols = `id::text, COALESCE(org_id::text,''), enabled, interval_minutes,
        retention_count, offsite_enabled, next_run_at, last_run_at`
 
-func scanSchedule(row pgx.Row) (*BackupSchedule, error) {
+func scanSchedule(row DBRow) (*BackupSchedule, error) {
 	var s BackupSchedule
 	err := row.Scan(&s.ID, &s.OrgID, &s.Enabled, &s.IntervalMinutes,
 		&s.RetentionCount, &s.OffsiteEnabled, &s.NextRunAt, &s.LastRunAt)

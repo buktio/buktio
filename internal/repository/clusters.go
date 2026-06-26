@@ -76,7 +76,7 @@ const clusterCols = `id::text, name, provider::text, mode::text, s3_endpoint, ad
        COALESCE(system_s3_access_key_id,''), system_s3_secret_enc,
        db_engine, replication_factor, status::text`
 
-func scanCluster(row pgx.Row) (*Cluster, error) {
+func scanCluster(row DBRow) (*Cluster, error) {
 	var c Cluster
 	err := row.Scan(
 		&c.ID, &c.Name, &c.Provider, &c.Mode, &c.S3Endpoint, &c.AdminEndpoint, &c.S3Region,

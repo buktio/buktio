@@ -126,14 +126,20 @@ func (s *Store) WriteAudit(ctx context.Context, orgID, actorUserID, actorType, a
 	// Hash-chain the row inside a per-org-serialized transaction so the chain can
 	// never fork. The tx runs on the pool (a system write with an explicit org_id),
 	// independent of any request-scoped RLS connection.
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.begin(ctx)
 	if err != nil {
 		return fmt.Errorf("repository: audit begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, orgLockKey(orgID)); err != nil {
-		return fmt.Errorf("repository: audit lock: %w", err)
+	// Serialize per-org hash-chain appends. On Postgres a transaction-scoped
+	// advisory lock does it without blocking other orgs. On SQLite the single
+	// writer connection (MaxOpenConns=1) already serializes every append, and
+	// pg_advisory_xact_lock does not exist, so the lock is skipped.
+	if s.Driver() != "sqlite" {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, orgLockKey(orgID)); err != nil {
+			return fmt.Errorf("repository: audit lock: %w", err)
+		}
 	}
 	var prev []byte
 	_ = tx.QueryRow(ctx,

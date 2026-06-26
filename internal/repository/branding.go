@@ -34,7 +34,7 @@ func (s *Store) GetBrandingByDomain(ctx context.Context, domain string) (*Brandi
 		   FROM org_branding WHERE lower(custom_domain)=lower($1)`, domain))
 }
 
-func scanBranding(row pgx.Row) (*Branding, error) {
+func scanBranding(row DBRow) (*Branding, error) {
 	var b Branding
 	err := row.Scan(&b.OrgID, &b.DisplayName, &b.LogoURL, &b.PrimaryColor, &b.EmailFrom, &b.CustomDomain)
 	if errors.Is(err, pgx.ErrNoRows) {

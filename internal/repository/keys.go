@@ -11,7 +11,7 @@ import (
 const keyCols = `id::text, org_id::text, COALESCE(project_id::text,''), storage_cluster_id::text,
        name, garage_access_key_id, COALESCE(secret_last_four,''), can_create_bucket, created_at`
 
-func scanKey(row pgx.Row) (*AccessKey, error) {
+func scanKey(row DBRow) (*AccessKey, error) {
 	var k AccessKey
 	err := row.Scan(&k.ID, &k.OrgID, &k.ProjectID, &k.ClusterID, &k.Name,
 		&k.GarageAccessKeyID, &k.SecretLastFour, &k.CanCreateBucket, &k.CreatedAt)

@@ -61,9 +61,11 @@ type StoragePoint struct {
 // StorageSeries returns project storage totals bucketed into stepSeconds-wide
 // intervals since `since`. Within each interval it takes the latest snapshot per
 // bucket, then sums across buckets — so the series tracks total stored bytes/objects
-// over time. (Postgres-specific; SQLite support is deferred.)
+// over time. Epoch bucketing differs by backend (Postgres extract(epoch)/to_timestamp
+// vs SQLite strftime/datetime), so the query is selected by driver; the row_number()
+// window and the rest are identical.
 func (s *Store) StorageSeries(ctx context.Context, projectID string, since time.Time, stepSeconds int) ([]StoragePoint, error) {
-	const q = `
+	q := `
 WITH bucketed AS (
   SELECT
     to_timestamp(floor(extract(epoch from captured_at) / $2) * $2) AS ts,
@@ -78,7 +80,31 @@ WITH bucketed AS (
 SELECT ts, COALESCE(sum(bytes_used),0), COALESCE(sum(object_count),0)
 FROM bucketed WHERE rn=1
 GROUP BY ts ORDER BY ts`
-	rows, err := s.q(ctx).Query(ctx, q, projectID, stepSeconds, since)
+	args := []any{projectID, stepSeconds, since}
+	sqliteMode := s.Driver() == "sqlite"
+	if sqliteMode {
+		// captured_at is DATETIME TEXT (UTC); strftime('%s') yields the epoch. ts is
+		// returned as the bucket epoch (INTEGER) — a computed column has no declared
+		// type, so modernc cannot map it to time.Time; we convert in Go below. Bind
+		// `since` as a matching UTC string so the comparison is correct.
+		q = `
+WITH bucketed AS (
+  SELECT
+    (CAST(strftime('%s', captured_at) AS INTEGER) / $2) * $2 AS ts,
+    bucket_id, bytes_used, object_count,
+    row_number() OVER (
+      PARTITION BY (CAST(strftime('%s', captured_at) AS INTEGER) / $2) * $2, bucket_id
+      ORDER BY captured_at DESC
+    ) AS rn
+  FROM usage_snapshots
+  WHERE project_id=$1 AND captured_at >= $3
+)
+SELECT ts, COALESCE(sum(bytes_used),0), COALESCE(sum(object_count),0)
+FROM bucketed WHERE rn=1
+GROUP BY ts ORDER BY ts`
+		args = []any{projectID, stepSeconds, since.UTC().Format("2006-01-02 15:04:05")}
+	}
+	rows, err := s.q(ctx).Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("repository: storage series: %w", err)
 	}
@@ -86,7 +112,13 @@ GROUP BY ts ORDER BY ts`
 	var out []StoragePoint
 	for rows.Next() {
 		var p StoragePoint
-		if err := rows.Scan(&p.TS, &p.BytesUsed, &p.ObjectCount); err != nil {
+		if sqliteMode {
+			var epoch int64
+			if err := rows.Scan(&epoch, &p.BytesUsed, &p.ObjectCount); err != nil {
+				return nil, fmt.Errorf("repository: storage series scan: %w", err)
+			}
+			p.TS = time.Unix(epoch, 0).UTC()
+		} else if err := rows.Scan(&p.TS, &p.BytesUsed, &p.ObjectCount); err != nil {
 			return nil, fmt.Errorf("repository: storage series scan: %w", err)
 		}
 		out = append(out, p)
@@ -105,13 +137,16 @@ type BucketUsageRow struct {
 
 // BucketUsageList returns the latest snapshot per live bucket in a project.
 func (s *Store) BucketUsageList(ctx context.Context, projectID string) ([]BucketUsageRow, error) {
+	// Latest snapshot per bucket via row_number() (portable; DISTINCT ON is PG-only).
 	const q = `
-SELECT DISTINCT ON (s.bucket_id)
-  s.bucket_id, b.name, s.bytes_used, s.object_count, s.quota_max_size
-FROM usage_snapshots s
+SELECT s.bucket_id, b.name, s.bytes_used, s.object_count, s.quota_max_size
+FROM (
+  SELECT bucket_id, bytes_used, object_count, quota_max_size,
+         row_number() OVER (PARTITION BY bucket_id ORDER BY captured_at DESC) AS rn
+  FROM usage_snapshots WHERE project_id=$1::uuid
+) s
 JOIN buckets b ON b.id = s.bucket_id
-WHERE s.project_id=$1::uuid AND b.deleted_at IS NULL
-ORDER BY s.bucket_id, s.captured_at DESC`
+WHERE s.rn=1 AND b.deleted_at IS NULL`
 	rows, err := s.q(ctx).Query(ctx, q, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("repository: bucket usage list: %w", err)
@@ -132,12 +167,12 @@ ORDER BY s.bucket_id, s.captured_at DESC`
 func (s *Store) ProjectUsageTotals(ctx context.Context, projectID string) (bytesUsed, objectCount int64, err error) {
 	const q = `
 WITH latest AS (
-  SELECT DISTINCT ON (bucket_id) bucket_id, bytes_used, object_count
+  SELECT bytes_used, object_count,
+         row_number() OVER (PARTITION BY bucket_id ORDER BY captured_at DESC) AS rn
   FROM usage_snapshots
   WHERE project_id=$1::uuid
-  ORDER BY bucket_id, captured_at DESC
 )
-SELECT COALESCE(sum(bytes_used),0), COALESCE(sum(object_count),0) FROM latest`
+SELECT COALESCE(sum(bytes_used),0), COALESCE(sum(object_count),0) FROM latest WHERE rn=1`
 	err = s.q(ctx).QueryRow(ctx, q, projectID).Scan(&bytesUsed, &objectCount)
 	if err != nil {
 		return 0, 0, nil

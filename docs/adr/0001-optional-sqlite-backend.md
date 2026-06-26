@@ -1,6 +1,6 @@
 # ADR 0001 — Optional SQLite backend
 
-**Status:** Accepted (implementation phased) · **Date:** 2026-06-26 · **Scope:** OSS core (v2.3b)
+**Status:** Implemented · **Date:** 2026-06-26 · **Scope:** OSS core (v2.3b)
 
 ## Context
 
@@ -69,18 +69,28 @@ DSN. Documented as the required step before applying a paid license.
 - **Chosen (C) — minimal buktio interfaces pgx already satisfies + SQLite adapter.** Lowest churn
   to the repository, no fragile shim, Postgres path byte-for-byte unchanged.
 
-## Phased implementation
+## Phased implementation — all phases delivered
 
-1. **Foundation (no SQLite yet):** introduce the `Querier/Rows/Row/Result` interfaces and a pgx
-   adapter; route `Store` through them; change the 13 explicit annotations + 1 batch. **Postgres
-   behaviour unchanged; full suite green.** ← safe, self-contained.
-2. **SQLite driver:** `modernc` connection, the translation wrapper, no-row normalization,
-   driver selection from the DSN.
-3. **Dual migrations:** translate `0001–0013`; gate paid migrations off on SQLite.
-4. **Portable rewrites:** the ~4 PG-only queries; SQLite backup via `VACUUM INTO`.
-5. **Convert CLI + entitlement gating + docs + e2e** (boot on SQLite: setup→login→bucket→object).
-
-Each phase ships behind the default (Postgres); SQLite is opt-in until phase 5 verifies it end to end.
+1. ✅ **Foundation:** `Querier/DBRows/DBRow/DBResult` interfaces + pgx adapter; `Store` routed
+   through them; 9 scan helpers + the batch made driver-agnostic. Postgres behaviour unchanged.
+   (`internal/repository/dbx.go`)
+2. ✅ **SQLite driver:** `modernc.org/sqlite` (CGO-free) behind `database/sql`; `translateToSQLite`
+   (`$N`→`?N`, strip `::casts`, `now()`→`CURRENT_TIMESTAMP`, `ILIKE`→`LIKE`, `IS [NOT] DISTINCT
+   FROM`→`IS [NOT]`), `sql.ErrNoRows`→`pgx.ErrNoRows`, `Tx` abstraction, `DriverFromDSN`.
+   (`internal/repository/sqlite.go`, `internal/db/sqlite.go`)
+3. ✅ **Migrations:** one consolidated SQLite-dialect baseline = Postgres `0001–0030` (a fresh
+   backend needs no incremental history); enum→`CHECK`, plpgsql `set_updated_at`→per-table
+   triggers, `gen_random_uuid()` registered as a Go scalar, timestamptz→`DATETIME` (so modernc
+   round-trips `time.Time`); RLS (0018) omitted (no-op on single-node). A tiny version-tracked
+   runner applies it. (`internal/db/migrations-sqlite/`, `MigrateSQLite`)
+4. ✅ **Portable rewrites:** `DISTINCT ON`→`row_number()` window (both backends); `StorageSeries`
+   epoch bucketing branched (PG `extract`/`to_timestamp` vs SQLite `strftime`); `scopes text[]`
+   via `array_to_string`/CSV; advisory lock skipped on SQLite (single writer serializes); backup
+   via `VACUUM INTO`. (`usage.go`, `orgs.go`, `audit.go`, `api_tokens.go`, `service/backups.go`)
+5. ✅ **Boot + upgrade + e2e:** `wireServices` selects the backend from the DSN; the paid editions
+   **fail closed** on a SQLite DSN; `buktio db convert --to postgres` copies every table in FK
+   order. Verified end to end on SQLite (setup→login→bucket→object→usage→backup) **and** the
+   convert path (SQLite→Postgres→login as the migrated admin). Postgres has zero regression.
 
 ## Consequences
 

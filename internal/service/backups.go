@@ -61,6 +61,24 @@ func (s *Services) runBackup(ctx context.Context, id string) {
 		return
 	}
 	ts := time.Now().UTC().Format("20060102-150405")
+
+	// SQLite (OSS single-node): an online VACUUM INTO produces a consistent copy
+	// of the database file — the SQLite analogue of pg_dump, no external tool.
+	if s.Store.Driver() == "sqlite" {
+		path := filepath.Join(s.BackupDir, fmt.Sprintf("buktio-metadata-%s.sqlite", ts))
+		if err := s.Store.BackupSQLite(ctx, path); err != nil {
+			_ = s.Store.FinishBackupJob(ctx, id, "failed", "", 0, "vacuum into: "+err.Error())
+			return
+		}
+		var size int64
+		if fi, err := os.Stat(path); err == nil {
+			size = fi.Size()
+		}
+		_ = s.Store.FinishBackupJob(ctx, id, "succeeded", path, size, "")
+		s.Logger.Info("backup completed", slog.String("id", id), slog.String("path", path), slog.Int64("bytes", size))
+		return
+	}
+
 	path := filepath.Join(s.BackupDir, fmt.Sprintf("buktio-metadata-%s.dump", ts))
 
 	// Pass connection params via PG* env vars (NOT argv) so the password never

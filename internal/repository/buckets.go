@@ -13,7 +13,7 @@ const bucketCols = `id::text, org_id::text, project_id::text, storage_cluster_id
        website_enabled, website_index_doc, COALESCE(website_error_doc,''),
        quota_max_size, quota_max_objects, created_at`
 
-func scanBucket(row pgx.Row) (*Bucket, error) {
+func scanBucket(row DBRow) (*Bucket, error) {
 	var b Bucket
 	err := row.Scan(&b.ID, &b.OrgID, &b.ProjectID, &b.ClusterID, &b.Name,
 		&b.GarageBucketID, &b.GarageGlobalAlias, &b.Visibility,

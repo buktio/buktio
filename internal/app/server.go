@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -10,8 +11,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/buktio/buktio/internal/audit"
 	"github.com/buktio/buktio/internal/authz"
@@ -80,18 +79,25 @@ func RunServer(version string, enf Enforcers) error {
 		logger.Warn("BUKTIO_ALLOW_INSECURE is set — serving without TLS enforcement; dev only")
 	}
 
+	// Fail closed: the paid editions require PostgreSQL (RLS, pg_dump, plpgsql, the
+	// app.current_org GUC are not portable to SQLite). SQLite is OSS-only; the
+	// upgrade path is `buktio db convert --to postgres` then point DATABASE_URL at it.
+	if ed != edition.OSS && cfg.DB.URL != "" && db.DriverFromDSN(cfg.DB.URL) == "sqlite" {
+		return fmt.Errorf("the %s edition requires PostgreSQL; SQLite is OSS-only — migrate with `buktio db convert --to postgres` and set DATABASE_URL to the Postgres DSN", ed)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	var (
-		pool *pgxpool.Pool
-		svc  *service.Services
+		store *repository.Store
+		svc   *service.Services
 	)
 
 	if cfg.DB.URL == "" {
 		logger.Warn("DATABASE_URL is not set — serving health endpoints only (no product API)")
 	} else {
-		pool, svc, err = wireServices(ctx, cfg, logger, version, enf)
+		store, svc, err = wireServices(ctx, cfg, logger, version, enf)
 		if err != nil {
 			return err
 		}
@@ -106,13 +112,13 @@ func RunServer(version string, enf Enforcers) error {
 		// Resume any migration / replication jobs interrupted by a restart (from cursor).
 		svc.ResumeMigrations(ctx)   // Hosted-M5
 		svc.ResumeReplications(ctx) // v2.6 cross-backend replication
-		defer func() { stop(); bg.Wait(); pool.Close() }()
+		defer func() { stop(); bg.Wait(); store.Close() }()
 	}
 
 	probe := &readinessProbe{
 		client:         &http.Client{Timeout: 3 * time.Second},
 		garageAdminURL: cfg.Garage.AdminURL,
-		pool:           pool,
+		store:          store,
 	}
 
 	var scimHandler http.Handler
@@ -162,33 +168,48 @@ func RunServer(version string, enf Enforcers) error {
 
 // wireServices opens the DB, migrates, provisions the storage backend, builds the
 // service facade, and injects the enforcers.
-func wireServices(ctx context.Context, cfg *config.Config, logger *slog.Logger, version string, enf Enforcers) (*pgxpool.Pool, *service.Services, error) {
-	pool, err := db.OpenPool(ctx, cfg.DB.URL)
-	if err != nil {
-		return nil, nil, err
+func wireServices(ctx context.Context, cfg *config.Config, logger *slog.Logger, version string, enf Enforcers) (*repository.Store, *service.Services, error) {
+	// Select the backend from the DSN: a sqlite:/file: scheme or *.db path uses the
+	// optional single-node SQLite backend (OSS); anything else is PostgreSQL (the
+	// default, and the only backend the paid editions support).
+	var store *repository.Store
+	if db.DriverFromDSN(cfg.DB.URL) == "sqlite" {
+		sdb, err := db.OpenSQLite(ctx, db.SQLitePath(cfg.DB.URL))
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := db.MigrateSQLite(ctx, sdb); err != nil {
+			_ = sdb.Close()
+			return nil, nil, err
+		}
+		store = repository.NewStoreSQLite(sdb)
+	} else {
+		pool, err := db.OpenPool(ctx, cfg.DB.URL)
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := db.Migrate(cfg.DB.URL); err != nil {
+			pool.Close()
+			return nil, nil, err
+		}
+		store = repository.NewStore(pool)
 	}
-	if err := db.Migrate(cfg.DB.URL); err != nil {
-		pool.Close()
-		return nil, nil, err
-	}
-	logger.Info("database migrated")
+	logger.Info("database migrated", slog.String("driver", store.Driver()))
 
 	kek, err := secret.DefaultProvider().KEK()
 	if err != nil {
-		pool.Close()
+		store.Close()
 		return nil, nil, err
 	}
 	sealer, err := secret.NewEnvelopeSealer(kek)
 	if err != nil {
-		pool.Close()
+		store.Close()
 		return nil, nil, err
 	}
 
-	store := repository.NewStore(pool)
-
 	prov, err := Provision(ctx, cfg, store, sealer, logger)
 	if err != nil {
-		pool.Close()
+		store.Close()
 		return nil, nil, err
 	}
 
@@ -240,23 +261,23 @@ func wireServices(ctx context.Context, cfg *config.Config, logger *slog.Logger, 
 		AccessKey: os.Getenv("BUKTIO_BACKUP_S3_ACCESS_KEY"),
 		Secret:    os.Getenv("BUKTIO_BACKUP_S3_SECRET"),
 	}
-	return pool, svc, nil
+	return store, svc, nil
 }
 
 // readinessProbe reports dependency health for /readyz.
 type readinessProbe struct {
 	client         *http.Client
 	garageAdminURL string
-	pool           *pgxpool.Pool
+	store          *repository.Store
 }
 
 func (p *readinessProbe) Check(ctx context.Context) (bool, map[string]string) {
 	components := map[string]string{}
 	ready := true
 
-	if p.pool == nil {
+	if p.store == nil {
 		components["db"] = "unconfigured"
-	} else if err := p.pool.Ping(ctx); err != nil {
+	} else if err := p.store.Ping(ctx); err != nil {
 		components["db"] = "down"
 		ready = false
 	} else {

@@ -25,12 +25,7 @@ type ReplicationJob struct {
 const replicationCols = `id::text, org_id::text, src_bucket_id::text, dst_bucket_id::text, status,
   copied_objects, skipped_objects, copied_bytes, cursor, error, created_at, updated_at`
 
-// rowScanner is satisfied by both pgx.Row and pgx.Rows.
-type rowScanner interface {
-	Scan(dest ...any) error
-}
-
-func scanReplication(row rowScanner) (ReplicationJob, error) {
+func scanReplication(row DBRow) (ReplicationJob, error) {
 	var j ReplicationJob
 	err := row.Scan(&j.ID, &j.OrgID, &j.SrcBucketID, &j.DstBucketID, &j.Status,
 		&j.CopiedObjects, &j.SkippedObjects, &j.CopiedBytes, &j.Cursor, &j.Error, &j.CreatedAt, &j.UpdatedAt)

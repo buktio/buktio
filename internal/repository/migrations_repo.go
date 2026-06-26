@@ -45,7 +45,7 @@ const migrationCols = `id::text, org_id::text, source_endpoint, source_region, s
 	source_access_key, source_secret_enc, dest_bucket_id::text, status, copied_objects, copied_bytes,
 	cursor, COALESCE(error,''), created_at`
 
-func scanMigrationJob(row pgx.Row) (*MigrationJob, error) {
+func scanMigrationJob(row DBRow) (*MigrationJob, error) {
 	var j MigrationJob
 	err := row.Scan(&j.ID, &j.OrgID, &j.SourceEndpoint, &j.SourceRegion, &j.SourceBucket,
 		&j.SourceAccessKey, &j.SourceSecretEnc, &j.DestBucketID, &j.Status, &j.CopiedObjects, &j.CopiedBytes,

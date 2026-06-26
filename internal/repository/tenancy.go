@@ -17,7 +17,7 @@ type DefaultTenant struct {
 // EnsureDefaultTenant returns the default org + project, creating them on first
 // run. MVP ships single-tenant UX over the multi-tenant schema.
 func (s *Store) EnsureDefaultTenant(ctx context.Context) (*DefaultTenant, error) {
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("repository: begin: %w", err)
 	}

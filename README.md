@@ -53,6 +53,26 @@ Then open **https://localhost**. In local dev, Caddy serves a self-signed certif
 
 On first run, a **setup wizard** creates your admin account. After that: create a bucket, issue an S3 access key, and start browsing/uploading objects.
 
+### Database backend (PostgreSQL or SQLite)
+
+buktio defaults to **PostgreSQL**. For a minimal single-node homelab install you can instead point
+`DATABASE_URL` at a **SQLite** file — zero external database, one less container:
+
+```bash
+DATABASE_URL=sqlite:///var/lib/buktio/buktio.db
+```
+
+SQLite is an **OSS, single-node** option. The paid editions (Pro/Enterprise) require PostgreSQL and
+**refuse to start** on a SQLite DSN. The one-time upgrade path preserves your data:
+
+```bash
+buktio db convert --to postgres \
+  --sqlite /var/lib/buktio/buktio.db \
+  --postgres-url postgres://user:pass@host:5432/buktio?sslmode=disable
+```
+
+Then set `DATABASE_URL` to the PostgreSQL DSN. See [ADR 0001](docs/adr/0001-optional-sqlite-backend.md).
+
 ## Features
 
 **Storage & clusters**

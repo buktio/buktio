@@ -26,7 +26,7 @@ type BackupJob struct {
 const backupCols = `id::text, COALESCE(org_id::text,''), kind::text, status::text,
        path, size_bytes, error, started_at, finished_at, created_at`
 
-func scanBackup(row pgx.Row) (*BackupJob, error) {
+func scanBackup(row DBRow) (*BackupJob, error) {
 	var b BackupJob
 	err := row.Scan(&b.ID, &b.OrgID, &b.Kind, &b.Status, &b.Path, &b.SizeBytes, &b.Error,
 		&b.StartedAt, &b.FinishedAt, &b.CreatedAt)

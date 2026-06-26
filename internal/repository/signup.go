@@ -13,7 +13,7 @@ import (
 // owner user with an owner membership, all in one transaction (self-serve signup).
 // Returns the new ids.
 func (s *Store) CreateOrgWithOwner(ctx context.Context, orgName, orgSlug, email, fullName, passwordHash string) (orgID, projectID, userID string, err error) {
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.begin(ctx)
 	if err != nil {
 		return "", "", "", fmt.Errorf("repository: signup begin: %w", err)
 	}
@@ -60,7 +60,7 @@ func (s *Store) CreateEmailVerification(ctx context.Context, userID string, toke
 // ConsumeEmailVerification validates + consumes a token, marks the user verified,
 // and returns the user id. ErrNotFound on an unknown/expired/used token.
 func (s *Store) ConsumeEmailVerification(ctx context.Context, tokenHash []byte) (string, error) {
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.begin(ctx)
 	if err != nil {
 		return "", fmt.Errorf("repository: verify begin: %w", err)
 	}

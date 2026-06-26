@@ -5,78 +5,68 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"errors"
-	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ErrNotFound is returned when a row does not exist.
 var ErrNotFound = errors.New("repository: not found")
 
-// querier is the subset of pgx used for ordinary statements. Both *pgxpool.Pool
-// and a request-scoped *pgxpool.Conn satisfy it, so repository methods run on the
-// pool by default and on an org-scoped connection when one is on the context.
-type querier interface {
-	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
-	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
-	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
-}
-
 // connCtxKey carries a request-scoped, org-bound connection on the context.
 type connCtxKey struct{}
 
-// Store is the data-access layer.
+// Store is the data-access layer. It runs over either PostgreSQL (pgx — the default,
+// and the only backend the paid editions support) or, for OSS single-node installs,
+// SQLite — selected by the dbHandle it is constructed with (see dbx.go / sqlite.go).
 type Store struct {
-	pool *pgxpool.Pool
+	h dbHandle
 }
 
-// NewStore wraps a pgx pool.
-func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+// NewStore wraps a PostgreSQL pool.
+func NewStore(pool *pgxpool.Pool) *Store { return &Store{h: pgxHandle{pool}} }
 
-// Pool exposes the underlying pool (for health checks).
-func (s *Store) Pool() *pgxpool.Pool { return s.pool }
+// NewStoreSQLite wraps a SQLite (database/sql) handle.
+func NewStoreSQLite(db *sql.DB) *Store { return &Store{h: sqliteHandle{db}} }
+
+// Pool exposes the pgx pool for health checks; nil on the SQLite backend.
+func (s *Store) Pool() *pgxpool.Pool {
+	if p, ok := s.h.(pgxHandle); ok {
+		return p.pool
+	}
+	return nil
+}
+
+// Ping verifies the database connection (any backend).
+func (s *Store) Ping(ctx context.Context) error { return s.h.ping(ctx) }
+
+// Driver reports the active backend: "postgres" or "sqlite".
+func (s *Store) Driver() string { return s.h.driver() }
+
+// Close releases the database handle.
+func (s *Store) Close() { s.h.close() }
 
 // q returns the statement runner for this context: a request-scoped org-bound
-// connection if one was attached by WithOrgConn, otherwise the shared pool.
-func (s *Store) q(ctx context.Context) querier {
-	if c, ok := ctx.Value(connCtxKey{}).(querier); ok && c != nil {
-		return c
+// connection if one was attached by WithOrgConn (Postgres RLS), otherwise the
+// backend's default querier.
+func (s *Store) q(ctx context.Context) Querier {
+	if c, ok := ctx.Value(connCtxKey{}).(pgxNative); ok && c != nil {
+		return pgxQuerier{c}
 	}
-	return s.pool
+	return s.h.querier()
 }
 
-// WithOrgConn checks out a dedicated connection, pins the RLS org on it via the
-// `app.current_org` GUC, and returns a child context that routes all repository
-// statements through that connection. Call release exactly once (defer) to clear
-// the GUC and return the connection to the pool. This is the integration point
-// for Postgres RLS (migration 0018): when the app connects as the non-superuser
-// `buktio_app` role, the org_isolation policy restricts every row to orgID.
-//
-// It holds a pooled connection (not a transaction) for the scope's lifetime, so
-// there is no idle-in-transaction risk across slow upstream (S3/Garage) calls.
+// WithOrgConn pins the RLS org for the scope and routes statements through a
+// dedicated connection (Postgres only — a no-op on SQLite). Call release exactly
+// once (defer). See pgxHandle.withOrgConn for the Postgres RLS details.
 func (s *Store) WithOrgConn(ctx context.Context, orgID string) (context.Context, func(), error) {
-	conn, err := s.pool.Acquire(ctx)
-	if err != nil {
-		return ctx, func() {}, fmt.Errorf("repository: acquire org conn: %w", err)
-	}
-	// Session-level (is_local=false) so it persists across this connection's
-	// statements; cleared on release. set_config is parameterized (no injection).
-	if _, err := conn.Exec(ctx, "SELECT set_config('app.current_org', $1, false)", orgID); err != nil {
-		conn.Release()
-		return ctx, func() {}, fmt.Errorf("repository: set org scope: %w", err)
-	}
-	release := func() {
-		// Best-effort clear on a fresh context so a cancelled request still resets
-		// the GUC before the connection is reused by another tenant.
-		_, _ = conn.Exec(context.Background(), "SELECT set_config('app.current_org', '', false)")
-		conn.Release()
-	}
-	return context.WithValue(ctx, connCtxKey{}, querier(conn)), release, nil
+	return s.h.withOrgConn(ctx, orgID)
 }
+
+// begin starts a transaction on the active backend (Postgres or SQLite).
+func (s *Store) begin(ctx context.Context) (Tx, error) { return s.h.begin(ctx) }
 
 // --- Domain row types ---
 

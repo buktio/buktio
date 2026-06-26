@@ -35,6 +35,7 @@ func main() {
 		upgradeCmd(),
 		doctorCmd(),
 		clusterCmd(),
+		dbCmd(),
 	)
 	if err := root.Execute(); err != nil {
 		os.Exit(1)

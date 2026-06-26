@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 )
 
 // TrafficSample is one (access-key, bucket, method) counter row to persist.
@@ -24,17 +22,14 @@ func (s *Store) InsertTrafficSnapshots(ctx context.Context, samples []TrafficSam
 	if len(samples) == 0 {
 		return nil
 	}
-	b := &pgx.Batch{}
+	// Sequential inserts through the driver-agnostic querier (portable to SQLite).
+	// Traffic snapshots flush at a low cadence, so the batch round-trip isn't needed.
+	q := s.q(ctx)
 	for _, sm := range samples {
-		b.Queue(`INSERT INTO traffic_snapshots
+		if _, err := q.Exec(ctx, `INSERT INTO traffic_snapshots
 		  (storage_cluster_id, access_key_id, bucket, method, requests, bytes_in, bytes_out)
 		 VALUES (NULLIF($1,'')::uuid, $2, $3, $4, $5, $6, $7)`,
-			sm.ClusterID, sm.AccessKeyID, sm.Bucket, sm.Method, sm.Requests, sm.BytesIn, sm.BytesOut)
-	}
-	br := s.pool.SendBatch(ctx, b)
-	defer br.Close()
-	for range samples {
-		if _, err := br.Exec(); err != nil {
+			sm.ClusterID, sm.AccessKeyID, sm.Bucket, sm.Method, sm.Requests, sm.BytesIn, sm.BytesOut); err != nil {
 			return fmt.Errorf("repository: insert traffic: %w", err)
 		}
 	}

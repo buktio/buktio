@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -57,9 +58,16 @@ WHERE t.token_hash=$1 AND t.deleted_at IS NULL AND (t.expires_at IS NULL OR t.ex
 
 // ListAPITokens returns a user's live tokens (newest first).
 func (s *Store) ListAPITokens(ctx context.Context, userID string) ([]APIToken, error) {
-	const q = `
-SELECT id::text, user_id::text, name, COALESCE(secret_last_four,''), scopes, expires_at, last_used_at, created_at
-FROM api_tokens WHERE user_id=$1::uuid AND deleted_at IS NULL ORDER BY created_at DESC`
+	// scopes is a Postgres text[] but a comma-separated TEXT on SQLite. Selecting
+	// it as a delimited string on both backends lets a single string scan + split
+	// cover both (scopes is unrestricted in OSS, so the round-trip is lossless).
+	scopesExpr := "array_to_string(scopes, ',')"
+	if s.Driver() == "sqlite" {
+		scopesExpr = "scopes"
+	}
+	q := fmt.Sprintf(`
+SELECT id::text, user_id::text, name, COALESCE(secret_last_four,''), %s, expires_at, last_used_at, created_at
+FROM api_tokens WHERE user_id=$1::uuid AND deleted_at IS NULL ORDER BY created_at DESC`, scopesExpr)
 	rows, err := s.q(ctx).Query(ctx, q, userID)
 	if err != nil {
 		return nil, fmt.Errorf("repository: list api tokens: %w", err)
@@ -68,8 +76,12 @@ FROM api_tokens WHERE user_id=$1::uuid AND deleted_at IS NULL ORDER BY created_a
 	var out []APIToken
 	for rows.Next() {
 		var t APIToken
-		if err := rows.Scan(&t.ID, &t.UserID, &t.Name, &t.SecretLastFour, &t.Scopes, &t.ExpiresAt, &t.LastUsedAt, &t.CreatedAt); err != nil {
+		var scopes string
+		if err := rows.Scan(&t.ID, &t.UserID, &t.Name, &t.SecretLastFour, &scopes, &t.ExpiresAt, &t.LastUsedAt, &t.CreatedAt); err != nil {
 			return nil, err
+		}
+		if scopes != "" {
+			t.Scopes = strings.Split(scopes, ",")
 		}
 		out = append(out, t)
 	}

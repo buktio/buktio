@@ -40,7 +40,7 @@ func (s *Store) UpsertBillingCustomer(ctx context.Context, c BillingCustomer) er
 	return nil
 }
 
-func scanBillingCustomer(row pgx.Row) (*BillingCustomer, error) {
+func scanBillingCustomer(row DBRow) (*BillingCustomer, error) {
 	var c BillingCustomer
 	var sub, storage, egress, requests *string
 	err := row.Scan(&c.OrgID, &c.StripeCustomerID, &sub, &storage, &egress, &requests, &c.Status)
